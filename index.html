@@ -138,40 +138,53 @@ body{
 </div>
 
 <script>
-// ===== CLASSIFIER (from app_classifier.py) =====
-var CENTROIDS={
-  initial:{hi_L:195.6,hi_a:122.6,hi_b:141.6,lo_L:184.5,lo_a:126.4,lo_b:136.1},
-  H2_only:{hi_L:193.0,hi_a:124.0,hi_b:136.9,lo_L:147.9,lo_a:129.1,lo_b:131.0},
-  H2O_only:{hi_L:195.3,hi_a:120.8,hi_b:148.0,lo_L:185.8,lo_a:126.4,lo_b:138.4},
-  'H2+RH':{hi_L:196.9,hi_a:122.6,hi_b:142.0,lo_L:183.6,lo_a:126.0,lo_b:136.3}
-};
+// ===== CLASSIFIER v3 (two-axis: H2O score + H2 score) =====
+// Baseline from initial state training data (90deg, n=87)
+var BL={hi_L:196.9,hi_a:122.9,hi_b:141.6,lo_L:184.5,lo_a:126.1,lo_b:136.1};
+
+// H2 concentration centroids (90deg, H2_only videos)
 var H2C={
   '1%':{hi_L:206.2,hi_a:124.3,hi_b:136.4,lo_L:138.3},
   '2%':{hi_L:196.9,hi_a:122.7,hi_b:138.6,lo_L:131.7},
   '3%':{hi_L:188.2,hi_a:124.5,hi_b:135.9,lo_L:171.9},
   '4%':{hi_L:198.9,hi_a:125.1,hi_b:134.8,lo_L:160.4}
 };
-var WT={hi_L:0.5,hi_a:1,hi_b:3,lo_L:3,lo_a:1,lo_b:1.5};
+
+function h2oScore(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
+  // Flame pink shift (hi_a increase) = strongest H2O signal
+  var s_pink=Math.max(0,hi_a-BL.hi_a)/3.0;
+  // Droplet blue shift (lo_b decrease)
+  var s_blue=Math.max(0,BL.lo_b-lo_b)/4.0;
+  // Flame stays yellow (hi_b not decreasing = not H2)
+  var s_notgreen=Math.max(0,hi_b-BL.hi_b)/5.0;
+  return s_pink*3.0+s_blue*2.0+s_notgreen*1.0;
+}
+
+function h2Score(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
+  // Flame green shift (hi_b decrease)
+  var s_green=Math.max(0,BL.hi_b-hi_b)/3.0;
+  // Flame darkening after swap (lo_L decrease)
+  var s_dark=Math.max(0,BL.lo_L-lo_L)/15.0;
+  // Penalty if hi_a is elevated (that's H2O, not H2)
+  var penalty=Math.max(0,hi_a-BL.hi_a-2)*1.0;
+  return s_green*2.5+s_dark*2.0-penalty;
+}
 
 function doClassify(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
-  var f={hi_L:hi_L,hi_a:hi_a,hi_b:hi_b,lo_L:lo_L,lo_a:lo_a,lo_b:lo_b};
-  var dists={};
-  for(var st in CENTROIDS){
-    var c=CENTROIDS[st]; var d=0;
-    for(var k in f) d+=WT[k]*(f[k]-c[k])*(f[k]-c[k]);
-    dists[st]=Math.sqrt(d);
-  }
+  var h2oS=h2oScore(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b);
+  var h2S=h2Score(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b);
+
+  var H2O_T=4.0, H2_T=4.4;
   var state;
-  if(lo_L<155) state='H2_only';
-  else if(hi_b>150) state='H2O_only';
-  else if(lo_L<178&&hi_b<145) state='H2+RH';
-  else{
-    var best=null,bd=1e9;
-    for(var s in dists){if(dists[s]<bd){bd=dists[s];best=s;}}
-    state=best;
-  }
+  if(h2oS>=H2O_T&&h2S>=H2_T) state='H2+RH';
+  else if(h2oS>=H2O_T) state='H2O_only';
+  else if(h2S>=H2_T) state='H2_only';
+  else state='initial';
+
+  // H2 concentration estimation
   var h2=null,rh=null;
-  if(state==='H2_only'){
+  if(state==='H2_only'||state==='H2+RH'){
+    var f={hi_L:hi_L,hi_a:hi_a,hi_b:hi_b,lo_L:lo_L};
     var best2=null,bd2=1e9;
     for(var c2 in H2C){
       var ref=H2C[c2];
@@ -179,19 +192,25 @@ function doClassify(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
       if(dd<bd2){bd2=dd;best2=c2;}
     }
     h2=best2;
-  }else if(state==='H2O_only'){
-    rh=hi_b>160?'90%':hi_b>155?'80%':'70%';
-  }else if(state==='H2+RH'){
-    h2=lo_L<160?'3-4%':lo_L<170?'2-3%':'1-2%';
-    rh=hi_b>142?'>60%':'<60%';
   }
+  if(state==='H2O_only'||state==='H2+RH'){
+    // RH estimation from droplet color (lo_b channel)
+    if(lo_b>138) rh='20-30%';
+    else if(lo_b>133) rh='30-50%';
+    else if(lo_b>127) rh='50-70%';
+    else rh='70-90%';
+  }
+
+  // Confidence
   var conf;
-  if(state==='H2_only'&&lo_L<145) conf='high';
-  else if(state==='H2O_only'&&hi_b>155) conf='high';
-  else if(state==='H2+RH'&&lo_L<170) conf='medium';
-  else if(state==='initial'&&lo_L>185&&hi_b>135&&hi_b<145) conf='medium';
+  if(state==='H2O_only'&&h2oS>8) conf='high';
+  else if(state==='H2_only'&&h2S>8) conf='high';
+  else if(state==='H2+RH') conf='medium';
+  else if(state==='initial'&&h2oS<1.5&&h2S<1.5) conf='high';
+  else if(state!=='initial') conf='medium';
   else conf='low';
-  return{state:state,conf:conf,h2:h2,rh:rh};
+
+  return{state:state,conf:conf,h2:h2,rh:rh,h2oS:Math.round(h2oS*10)/10,h2S:Math.round(h2S*10)/10};
 }
 
 // ===== UI =====
@@ -425,7 +444,7 @@ function detectAndClassify(src){
   else{hi=labs[1];lo=labs[0];}
 
   var clf=doClassify(hi.L,hi.a,hi.b,lo.L,lo.a,lo.b);
-  clf.dbg='hi=('+hi.L.toFixed(0)+','+hi.a.toFixed(0)+','+hi.b.toFixed(0)+') lo=('+lo.L.toFixed(0)+','+lo.a.toFixed(0)+','+lo.b.toFixed(0)+')';
+  clf.dbg='hi=('+hi.L.toFixed(0)+','+hi.a.toFixed(0)+','+hi.b.toFixed(0)+') lo=('+lo.L.toFixed(0)+','+lo.a.toFixed(0)+','+lo.b.toFixed(0)+') H2O='+clf.h2oS+' H2='+clf.h2S;
   return clf;
 }
 
