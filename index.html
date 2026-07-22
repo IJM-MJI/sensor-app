@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Sensor Data</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:#f5f5f5;color:#222;
+  max-width:480px;margin:0 auto;
+  min-height:100vh;
+  -webkit-user-select:none;user-select:none;
+}
+.header{
+  background:#fff;text-align:center;padding:14px;
+  font-size:20px;font-weight:700;
+  border-bottom:1px solid #e0e0e0;
+  position:sticky;top:0;z-index:10;
+}
+.cam-wrap{
+  position:relative;width:100%;
+  aspect-ratio:1;background:#000;overflow:hidden;
+}
+.cam-wrap video{width:100%;height:100%;object-fit:cover}
+.cam-wrap canvas{display:none}
+#overlay{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  pointer-events:none;
+}
+.ctrl{
+  display:flex;gap:8px;padding:10px 14px;
+  background:#fff;border-bottom:1px solid #e0e0e0;
+  align-items:center;
+}
+.btn{
+  flex:1;padding:12px 6px;border:none;border-radius:8px;
+  font-size:14px;font-weight:600;cursor:pointer;
+}
+.btn-go{background:#2196F3;color:#fff}
+.btn-go:active{background:#1976D2}
+.btn-go.busy{background:#f44336}
+.btn-auto{background:#4CAF50;color:#fff;flex:0.5}
+.btn-auto.on{background:#f44336}
+.sel{
+  padding:10px;border:1px solid #ccc;border-radius:8px;
+  font-size:14px;flex:0.4;
+}
+.card{
+  background:#fff;margin:8px 14px;border-radius:12px;
+  padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.1);
+}
+.card h3{font-size:13px;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+.state-row{display:flex;align-items:center;gap:10px}
+.dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
+.state-name{font-size:20px;font-weight:700}
+.conf{font-size:13px;color:#888;margin-left:24px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #f0f0f0}
+.row:last-child{border-bottom:none}
+.lbl{font-size:15px;color:#555}
+.val{font-size:17px;font-weight:600}
+.status-row{display:flex;align-items:center;gap:8px;padding:8px 0}
+.status-dot{width:10px;height:10px;border-radius:50%}
+.status-txt{font-size:14px;font-weight:500}
+.hidden{display:none}
+.loading{text-align:center;padding:60px 20px;color:#888}
+.loading .spin{
+  display:inline-block;width:40px;height:40px;
+  border:4px solid #e0e0e0;border-top-color:#2196F3;
+  border-radius:50%;animation:sp .7s linear infinite;
+}
+@keyframes sp{to{transform:rotate(360deg)}}
+.debug{font-size:11px;color:#999;padding:4px 14px;word-break:break-all}
+</style>
+</head>
+<body>
+
+<div class="header">Sensor Data</div>
+
+<div id="loadingScreen" class="loading">
+  <div class="spin"></div>
+  <p style="margin-top:16px">Loading OpenCV.js...</p>
+</div>
+
+<div id="appContent" class="hidden">
+  <div class="cam-wrap">
+    <video id="vid" autoplay playsinline muted></video>
+    <canvas id="cvs"></canvas>
+    <canvas id="overlay"></canvas>
+  </div>
+
+  <div class="ctrl">
+    <select class="sel" id="angle">
+      <option value="90">90°</option>
+      <option value="80">80°</option>
+      <option value="70">70°</option>
+      <option value="60">60°</option>
+    </select>
+    <button class="btn btn-go" id="goBtn" onclick="run()">Classify</button>
+    <button class="btn btn-auto" id="autoBtn" onclick="toggleAuto()">Auto</button>
+  </div>
+
+  <div id="resArea">
+    <div class="card">
+      <h3>Current Reading</h3>
+      <div class="state-row">
+        <div class="dot" id="sDot" style="background:#999"></div>
+        <div class="state-name" id="sName">Ready</div>
+      </div>
+      <div class="conf" id="sConf"></div>
+    </div>
+    <div class="card">
+      <h3>Concentration</h3>
+      <div class="row">
+        <span class="lbl">H₂</span>
+        <span class="val" id="h2Val">-</span>
+      </div>
+      <div class="row">
+        <span class="lbl">Humidity</span>
+        <span class="val" id="rhVal">-</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="status-row">
+        <div class="status-dot" id="stDot" style="background:#999"></div>
+        <span class="status-txt" id="stTxt">Waiting for capture</span>
+      </div>
+    </div>
+  </div>
+  <div class="debug" id="dbg"></div>
+</div>
+
+<script>
+// ===== CLASSIFIER CONSTANTS (from app_classifier.py) =====
+const CENTROIDS = {
+  initial:  {hi_L:195.6,hi_a:122.6,hi_b:141.6,lo_L:184.5,lo_a:126.4,lo_b:136.1},
+  H2_only:  {hi_L:193.0,hi_a:124.0,hi_b:136.9,lo_L:147.9,lo_a:129.1,lo_b:131.0},
+  H2O_only: {hi_L:195.3,hi_a:120.8,hi_b:148.0,lo_L:185.8,lo_a:126.4,lo_b:138.4},
+  'H2+RH':  {hi_L:196.9,hi_a:122.6,hi_b:142.0,lo_L:183.6,lo_a:126.0,lo_b:136.3},
+};
+const H2_CONC = {
+  '1%':{hi_L:206.2,hi_a:124.3,hi_b:136.4,lo_L:138.3},
+  '2%':{hi_L:196.9,hi_a:122.7,hi_b:138.6,lo_L:131.7},
+  '3%':{hi_L:188.2,hi_a:124.5,hi_b:135.9,lo_L:171.9},
+  '4%':{hi_L:198.9,hi_a:125.1,hi_b:134.8,lo_L:160.4},
+};
+const WEIGHTS={hi_L:.5,hi_a:1,hi_b:3,lo_L:3,lo_a:1,lo_b:1.5};
+
+function classifyState(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
+  const f={hi_L,hi_a,hi_b,lo_L,lo_a,lo_b};
+  // distances
+  const dists={};
+  for(const[st,c] of Object.entries(CENTROIDS)){
+    let d=0;
+    for(const k of Object.keys(f)) d+=WEIGHTS[k]*(f[k]-c[k])**2;
+    dists[st]=Math.sqrt(d);
+  }
+  let state;
+  if(lo_L<155) state='H2_only';
+  else if(hi_b>150) state='H2O_only';
+  else if(lo_L<178&&hi_b<145) state='H2+RH';
+  else state=Object.entries(dists).sort((a,b)=>a[1]-b[1])[0][0];
+
+  let h2=null, rh=null;
+  if(state==='H2_only'){
+    let best=null,bestD=1e9;
+    for(const[c,ref] of Object.entries(H2_CONC)){
+      const d=Math.sqrt((f.hi_L-ref.hi_L)**2+(f.hi_a-ref.hi_a)**2+(f.hi_b-ref.hi_b)**2+(f.lo_L-ref.lo_L)**2);
+      if(d<bestD){bestD=d;best=c;}
+    }
+    h2=best;
+  } else if(state==='H2O_only'){
+    rh=hi_b>160?'90%':hi_b>155?'80%':'70%';
+  } else if(state==='H2+RH'){
+    h2=lo_L<160?'3-4%':lo_L<170?'2-3%':'1-2%';
+    rh=hi_b>142?'>60%':'<60%';
+  }
+
+  let conf;
+  if(state==='H2_only'&&lo_L<145) conf='high';
+  else if(state==='H2O_only'&&hi_b>155) conf='high';
+  else if(state==='H2+RH'&&lo_L<170) conf='medium';
+  else if(state==='initial'&&lo_L>185&&hi_b>135&&hi_b<145) conf='medium';
+  else conf='low';
+
+  return {state,conf,h2,rh,dists,features:f};
+}
+
+// ===== UI =====
+const stateColors={no_sensor:'#999',initial:'#66bb6a',H2_only:'#ef5350',H2O_only:'#42a5f5','H2+RH':'#ab47bc'};
+const stateNames={no_sensor:'No Sensor Detected',initial:'Initial State',H2_only:'H₂ Detection',H2O_only:'Humidity Detection','H2+RH':'Simultaneous Detection'};
+const statusMsgs={no_sensor:['Sensor not found','#999'],initial:['Status: Standby','#66bb6a'],H2_only:['Warning: H₂ Detected','#ef5350'],H2O_only:['High Humidity Detected','#42a5f5'],'H2+RH':['H₂ + Humidity Detected','#ab47bc']};
+
+function showResult(r){
+  const c=stateColors[r.state]||'#999';
+  document.getElementById('sDot').style.background=c;
+  document.getElementById('sName').textContent=stateNames[r.state]||r.state;
+  const cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
+  document.getElementById('sConf').textContent=cm[r.conf]||r.conf||'';
+
+  const h2El=document.getElementById('h2Val');
+  if(r.h2){h2El.textContent=r.h2+' (Below LEL)';h2El.style.color='#ef5350';}
+  else{h2El.textContent='Not Detected';h2El.style.color='#222';}
+
+  const rhEl=document.getElementById('rhVal');
+  if(r.rh){rhEl.textContent=r.rh;rhEl.style.color='#42a5f5';}
+  else{rhEl.textContent='Normal';rhEl.style.color='#222';}
+
+  const[msg,sc]=statusMsgs[r.state]||['Unknown','#999'];
+  document.getElementById('stDot').style.background=sc;
+  document.getElementById('stTxt').textContent=msg;
+  document.getElementById('stTxt').style.color=sc;
+}
+
+// ===== CAMERA =====
+const vid=document.getElementById('vid');
+const cvs=document.getElementById('cvs');
+const ctx2d=cvs.getContext('2d');
+const olc=document.getElementById('overlay');
+const olCtx=olc.getContext('2d');
+let autoTimer=null, busy=false;
+
+async function initCam(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'environment',width:{ideal:1280},height:{ideal:960}}
+    });
+    vid.srcObject=stream;
+    vid.play();
+  }catch(e){
+    document.getElementById('dbg').textContent='Camera: '+e.message;
+  }
+}
+
+// ===== IMAGE PROCESSING WITH OPENCV.JS =====
+function processFrame(){
+  const vw=vid.videoWidth, vh=vid.videoHeight;
+  if(!vw||!vh) return null;
+  cvs.width=vw; cvs.height=vh;
+  ctx2d.drawImage(vid,0,0);
+
+  const src=cv.imread(cvs);
+  const result = detectAndClassify(src);
+  src.delete();
+  return result;
+}
+
+function detectAndClassify(src){
+  const h=src.rows, w=src.cols;
+
+  // 1. Find circular window
+  const gray=new cv.Mat();
+  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+
+  // Resize for speed
+  const maxDim=800;
+  const scale=Math.max(h,w)>maxDim ? maxDim/Math.max(h,w) : 1.0;
+  const small=new cv.Mat();
+  if(scale<1){
+    cv.resize(gray,small,new cv.Size(Math.round(w*scale),Math.round(h*scale)));
+  } else {
+    gray.copyTo(small);
+  }
+
+  const blurred=new cv.Mat();
+  cv.GaussianBlur(small,blurred,new cv.Size(9,9),2);
+
+  const sh=small.rows, sw=small.cols;
+  const minR=Math.round(Math.min(sh,sw)*0.15);
+  const maxR=Math.round(Math.min(sh,sw)*0.45);
+
+  const circles=new cv.Mat();
+  cv.HoughCircles(blurred,circles,cv.HOUGH_GRADIENT,1.2,
+    Math.round(Math.min(sh,sw)/2),80,40,minR,maxR);
+
+  small.delete(); blurred.delete();
+
+  if(circles.cols===0){
+    gray.delete(); circles.delete();
+    return {state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'No circle found'};
+  }
+
+  // Pick best circle by inner brightness
+  let bestCx=0,bestCy=0,bestR=0,bestBright=-1;
+  for(let i=0;i<circles.cols;i++){
+    let cx=Math.round(circles.data32F[i*3]/scale);
+    let cy=Math.round(circles.data32F[i*3+1]/scale);
+    let r=Math.round(circles.data32F[i*3+2]/scale);
+    // Quick brightness check
+    const ir=Math.round(r*0.6);
+    let sum=0,cnt=0;
+    for(let dy=-ir;dy<=ir;dy+=4){
+      for(let dx=-ir;dx<=ir;dx+=4){
+        const px=cx+dx, py=cy+dy;
+        if(px>=0&&px<w&&py>=0&&py<h&&dx*dx+dy*dy<=ir*ir){
+          sum+=gray.ucharAt(py,px);cnt++;
+        }
+      }
+    }
+    const avg=cnt>0?sum/cnt:0;
+    if(avg>bestBright){bestBright=avg;bestCx=cx;bestCy=cy;bestR=r;}
+  }
+  circles.delete();
+
+  if(bestBright<80){
+    gray.delete();
+    return {state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'Circle too dark'};
+  }
+
+  // 2. Convert to LAB
+  const lab=new cv.Mat();
+  cv.cvtColor(src,lab,cv.COLOR_RGBA2Lab); // Note: OpenCV.js uses Lab not LAB
+
+  // 3. Find colored regions inside circle using chroma
+  const innerR=Math.round(bestR*0.85);
+  const chromaMap=new cv.Mat(h,w,cv.CV_32F,new cv.Scalar(0));
+
+  // Sample chroma in circle
+  for(let y=Math.max(0,bestCy-innerR);y<Math.min(h,bestCy+innerR);y++){
+    for(let x=Math.max(0,bestCx-innerR);x<Math.min(w,bestCx+innerR);x++){
+      const dx=x-bestCx, dy=y-bestCy;
+      if(dx*dx+dy*dy<=innerR*innerR){
+        const a=lab.ucharAt(y,x*3+1)-128;
+        const b=lab.ucharAt(y,x*3+2)-128;
+        chromaMap.floatAt(y,x,Math.sqrt(a*a+b*b));
+      }
+    }
+  }
+
+  // Find high-chroma pixels (sensor shapes are colorful vs gray substrate)
+  // Get 90th percentile of chroma
+  const chromaVals=[];
+  for(let y=Math.max(0,bestCy-innerR);y<Math.min(h,bestCy+innerR);y+=2){
+    for(let x=Math.max(0,bestCx-innerR);x<Math.min(w,bestCx+innerR);x+=2){
+      const dx=x-bestCx, dy=y-bestCy;
+      if(dx*dx+dy*dy<=innerR*innerR){
+        const v=chromaMap.floatAt(y,x);
+        if(v>0) chromaVals.push(v);
+      }
+    }
+  }
+  chromaVals.sort((a,b)=>a-b);
+
+  if(chromaVals.length<50){
+    gray.delete(); lab.delete(); chromaMap.delete();
+    return {state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'Too few pixels in circle'};
+  }
+
+  const p90=chromaVals[Math.floor(chromaVals.length*0.90)];
+  const thresh=Math.max(p90*0.6, 10);
+
+  // Create binary mask of high-chroma pixels
+  const mask=new cv.Mat(h,w,cv.CV_8U,new cv.Scalar(0));
+  for(let y=Math.max(0,bestCy-innerR);y<Math.min(h,bestCy+innerR);y++){
+    for(let x=Math.max(0,bestCx-innerR);x<Math.min(w,bestCx+innerR);x++){
+      const dx=x-bestCx, dy=y-bestCy;
+      if(dx*dx+dy*dy<=innerR*innerR && chromaMap.floatAt(y,x)>thresh){
+        mask.ucharPtr(y,x)[0]=255;
+      }
+    }
+  }
+  chromaMap.delete();
+
+  // Morphological cleanup
+  const kOpen=cv.getStructuringElement(cv.MORPH_ELLIPSE,new cv.Size(7,7));
+  const kClose=cv.getStructuringElement(cv.MORPH_ELLIPSE,new cv.Size(11,11));
+  cv.morphologyEx(mask,mask,cv.MORPH_OPEN,kOpen);
+  cv.morphologyEx(mask,mask,cv.MORPH_CLOSE,kClose);
+  cv.morphologyEx(mask,mask,cv.MORPH_OPEN,kOpen);
+  kOpen.delete(); kClose.delete();
+
+  // 4. Find contours
+  const contours=new cv.MatVector();
+  const hierarchy=new cv.Mat();
+  cv.findContours(mask,contours,hierarchy,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+
+  // Filter by area - keep 2 largest valid contours
+  const circleArea=Math.PI*bestR*bestR;
+  const shapes=[];
+  for(let i=0;i<contours.size();i++){
+    const cnt=contours.get(i);
+    const area=cv.contourArea(cnt);
+    if(area<circleArea*0.01||area>circleArea*0.5) continue;
+    const M=cv.moments(cnt);
+    if(M.m00===0) continue;
+    const cx=M.m10/M.m00, cy=M.m01/M.m00;
+    shapes.push({idx:i,area,cx,cy});
+  }
+
+  shapes.sort((a,b)=>b.area-a.area);
+
+  if(shapes.length<2){
+    // Draw overlay showing what we found
+    drawOverlay(bestCx,bestCy,bestR,shapes,contours,src);
+    gray.delete(); lab.delete(); mask.delete(); contours.delete(); hierarchy.delete();
+    return {state:'no_sensor',conf:'-',h2:null,rh:null,
+            dbg:`Found ${shapes.length} shape(s), need 2. thresh=${thresh.toFixed(1)}`};
+  }
+
+  // 5. Extract LAB for top 2 shapes
+  const labs=[];
+  for(let si=0;si<2;si++){
+    const cnt=contours.get(shapes[si].idx);
+    const shapeMask=new cv.Mat(h,w,cv.CV_8U,new cv.Scalar(0));
+    const vec=new cv.MatVector();
+    vec.push_back(cnt);
+    cv.drawContours(shapeMask,vec,-1,new cv.Scalar(255),-1);
+
+    let sumL=0,sumA=0,sumB=0,cnt2=0;
+    for(let y=Math.max(0,Math.round(shapes[si].cy)-100);
+        y<Math.min(h,Math.round(shapes[si].cy)+100);y++){
+      for(let x=Math.max(0,Math.round(shapes[si].cx)-100);
+          x<Math.min(w,Math.round(shapes[si].cx)+100);x++){
+        if(shapeMask.ucharAt(y,x)>0){
+          sumL+=lab.ucharAt(y,x*3);
+          sumA+=lab.ucharAt(y,x*3+1);
+          sumB+=lab.ucharAt(y,x*3+2);
+          cnt2++;
+        }
+      }
+    }
+    shapeMask.delete(); vec.delete();
+
+    if(cnt2>0) labs.push({L:sumL/cnt2,a:sumA/cnt2,b:sumB/cnt2});
+    else labs.push({L:128,a:128,b:128});
+  }
+
+  // 6. Sort by b-channel (higher b = "hi" shape)
+  let hi,lo;
+  if(labs[0].b>=labs[1].b){hi=labs[0];lo=labs[1];}
+  else{hi=labs[1];lo=labs[0];}
+
+  // 7. Classify
+  const clf=classifyState(hi.L,hi.a,hi.b,lo.L,lo.a,lo.b);
+
+  // Draw overlay
+  drawOverlay(bestCx,bestCy,bestR,shapes,contours,src);
+
+  const dbgStr=`hi=(${hi.L.toFixed(0)},${hi.a.toFixed(0)},${hi.b.toFixed(0)}) `+
+               `lo=(${lo.L.toFixed(0)},${lo.a.toFixed(0)},${lo.b.toFixed(0)})`;
+
+  gray.delete(); lab.delete(); mask.delete(); contours.delete(); hierarchy.delete();
+
+  return {...clf, dbg:dbgStr};
+}
+
+function drawOverlay(cx,cy,r,shapes,contours,src){
+  const vw=vid.videoWidth, vh=vid.videoHeight;
+  olc.width=olc.clientWidth;
+  olc.height=olc.clientHeight;
+  const sx=olc.width/vw, sy=olc.height/vh;
+
+  olCtx.clearRect(0,0,olc.width,olc.height);
+
+  // Draw circle
+  olCtx.strokeStyle='rgba(0,255,0,0.5)';
+  olCtx.lineWidth=2;
+  olCtx.beginPath();
+  olCtx.arc(cx*sx,cy*sy,r*sx,0,Math.PI*2);
+  olCtx.stroke();
+
+  // Draw shapes
+  const colors=['rgba(255,100,0,0.7)','rgba(0,180,255,0.7)'];
+  for(let i=0;i<Math.min(2,shapes.length);i++){
+    const cnt=contours.get(shapes[i].idx);
+    olCtx.strokeStyle=colors[i];
+    olCtx.lineWidth=2;
+    olCtx.beginPath();
+    for(let j=0;j<cnt.rows;j++){
+      const px=cnt.data32S[j*2]*sx, py=cnt.data32S[j*2+1]*sy;
+      if(j===0) olCtx.moveTo(px,py);
+      else olCtx.lineTo(px,py);
+    }
+    olCtx.closePath();
+    olCtx.stroke();
+  }
+}
+
+// ===== MAIN =====
+function run(){
+  if(busy) return;
+  busy=true;
+  const btn=document.getElementById('goBtn');
+  btn.textContent='...';btn.classList.add('busy');
+
+  setTimeout(()=>{
+    try{
+      const r=processFrame();
+      if(r) {
+        showResult(r);
+        document.getElementById('dbg').textContent=r.dbg||'';
+      }
+    }catch(e){
+      document.getElementById('dbg').textContent='Error: '+e.message;
+    }
+    btn.textContent='Classify';btn.classList.remove('busy');
+    busy=false;
+  },50);
+}
+
+function toggleAuto(){
+  const btn=document.getElementById('autoBtn');
+  if(autoTimer){
+    clearInterval(autoTimer);autoTimer=null;
+    btn.textContent='Auto';btn.classList.remove('on');
+  }else{
+    btn.textContent='Stop';btn.classList.add('on');
+    run();
+    autoTimer=setInterval(()=>{if(!busy)run();},3000);
+  }
+}
+
+// ===== LOAD OPENCV.JS =====
+function onOpenCvReady(){
+  document.getElementById('loadingScreen').classList.add('hidden');
+  document.getElementById('appContent').classList.remove('hidden');
+  initCam();
+}
+
+// Load OpenCV.js from CDN
+const script=document.createElement('script');
+script.src='https://docs.opencv.org/4.9.0/opencv.js';
+script.async=true;
+script.onload=function(){
+  if(typeof cv==='object'&&cv.then){
+    cv.then(function(openCv){cv=openCv;onOpenCvReady();});
+  } else {
+    // cv.onRuntimeInitialized
+    if(cv.Mat) onOpenCvReady();
+    else cv['onRuntimeInitialized']=onOpenCvReady;
+  }
+};
+script.onerror=function(){
+  document.getElementById('loadingScreen').innerHTML=
+    '<p style="color:#f44336">Failed to load OpenCV.js.<br>Check internet connection.</p>';
+};
+document.head.appendChild(script);
+</script>
+</body>
+</html>
