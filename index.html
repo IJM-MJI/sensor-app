@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Sensor Data</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:#f5f5f5;color:#222;
+  max-width:480px;margin:0 auto;
+  -webkit-user-select:none;user-select:none;
+}
+.header{
+  background:#fff;text-align:center;padding:14px;
+  font-size:20px;font-weight:700;
+  border-bottom:1px solid #e0e0e0;
+  position:sticky;top:0;z-index:10;
+}
+.cam-wrap{
+  position:relative;width:100%;
+  aspect-ratio:1;background:#000;overflow:hidden;
+}
+.cam-wrap video,.cam-wrap img{
+  width:100%;height:100%;object-fit:cover;display:block;
+}
+.cam-wrap canvas{display:none}
+#capturedImg{display:none}
+.shutter-area{
+  display:flex;justify-content:center;align-items:center;
+  padding:16px;background:#111;gap:20px;
+}
+.shutter{
+  width:70px;height:70px;border-radius:50%;
+  border:4px solid #fff;background:transparent;
+  cursor:pointer;position:relative;
+}
+.shutter::after{
+  content:'';position:absolute;
+  top:4px;left:4px;right:4px;bottom:4px;
+  border-radius:50%;background:#fff;
+  transition:transform .1s;
+}
+.shutter:active::after{transform:scale(0.85)}
+.retake{
+  padding:12px 24px;border:none;border-radius:8px;
+  background:#444;color:#fff;font-size:15px;cursor:pointer;
+}
+.card{
+  background:#fff;margin:8px 14px;border-radius:12px;
+  padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.1);
+}
+.card h3{font-size:13px;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+.state-row{display:flex;align-items:center;gap:10px}
+.dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
+.state-name{font-size:20px;font-weight:700}
+.conf{font-size:13px;color:#888;margin-left:24px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #f0f0f0}
+.row:last-child{border-bottom:none}
+.lbl{font-size:15px;color:#555}
+.val{font-size:17px;font-weight:600}
+.status-row{display:flex;align-items:center;gap:8px;padding:8px 0}
+.status-dot{width:10px;height:10px;border-radius:50%}
+.status-txt{font-size:14px;font-weight:500}
+.hidden{display:none}
+.loading{text-align:center;padding:80px 20px;color:#888}
+.spin{
+  display:inline-block;width:40px;height:40px;
+  border:4px solid #e0e0e0;border-top-color:#2196F3;
+  border-radius:50%;animation:sp .7s linear infinite;
+}
+@keyframes sp{to{transform:rotate(360deg)}}
+.proc-overlay{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,0.5);display:flex;
+  align-items:center;justify-content:center;
+  color:#fff;font-size:16px;flex-direction:column;gap:12px;
+}
+.dbg{font-size:11px;color:#999;padding:4px 14px;word-break:break-all}
+</style>
+</head>
+<body>
+
+<div class="header">Sensor Data</div>
+
+<div id="loadingScreen" class="loading">
+  <div class="spin"></div>
+  <p style="margin-top:16px">Loading OpenCV.js...</p>
+  <p style="margin-top:8px;font-size:13px;color:#aaa">First load may take 10-20 seconds</p>
+</div>
+
+<div id="app" class="hidden">
+  <div class="cam-wrap" id="camWrap">
+    <video id="vid" autoplay playsinline muted></video>
+    <img id="capturedImg">
+    <canvas id="cvs"></canvas>
+    <div id="procOverlay" class="proc-overlay hidden">
+      <div class="spin"></div>
+      <span>Analyzing...</span>
+    </div>
+  </div>
+
+  <div class="shutter-area">
+    <button class="retake hidden" id="retakeBtn" onclick="retake()">Retake</button>
+    <button class="shutter" id="shutterBtn" onclick="capture()"></button>
+  </div>
+
+  <div id="resArea" class="hidden">
+    <div class="card">
+      <h3>Current Reading</h3>
+      <div class="state-row">
+        <div class="dot" id="sDot" style="background:#999"></div>
+        <div class="state-name" id="sName">-</div>
+      </div>
+      <div class="conf" id="sConf"></div>
+    </div>
+    <div class="card">
+      <h3>Concentration</h3>
+      <div class="row">
+        <span class="lbl">H&#8322;</span>
+        <span class="val" id="h2Val">-</span>
+      </div>
+      <div class="row">
+        <span class="lbl">Humidity</span>
+        <span class="val" id="rhVal">-</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="status-row">
+        <div class="status-dot" id="stDot" style="background:#999"></div>
+        <span class="status-txt" id="stTxt">-</span>
+      </div>
+    </div>
+  </div>
+  <div class="dbg" id="dbg"></div>
+</div>
+
+<script>
+// ===== CLASSIFIER (from app_classifier.py) =====
+var CENTROIDS={
+  initial:{hi_L:195.6,hi_a:122.6,hi_b:141.6,lo_L:184.5,lo_a:126.4,lo_b:136.1},
+  H2_only:{hi_L:193.0,hi_a:124.0,hi_b:136.9,lo_L:147.9,lo_a:129.1,lo_b:131.0},
+  H2O_only:{hi_L:195.3,hi_a:120.8,hi_b:148.0,lo_L:185.8,lo_a:126.4,lo_b:138.4},
+  'H2+RH':{hi_L:196.9,hi_a:122.6,hi_b:142.0,lo_L:183.6,lo_a:126.0,lo_b:136.3}
+};
+var H2C={
+  '1%':{hi_L:206.2,hi_a:124.3,hi_b:136.4,lo_L:138.3},
+  '2%':{hi_L:196.9,hi_a:122.7,hi_b:138.6,lo_L:131.7},
+  '3%':{hi_L:188.2,hi_a:124.5,hi_b:135.9,lo_L:171.9},
+  '4%':{hi_L:198.9,hi_a:125.1,hi_b:134.8,lo_L:160.4}
+};
+var WT={hi_L:0.5,hi_a:1,hi_b:3,lo_L:3,lo_a:1,lo_b:1.5};
+
+function doClassify(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
+  var f={hi_L:hi_L,hi_a:hi_a,hi_b:hi_b,lo_L:lo_L,lo_a:lo_a,lo_b:lo_b};
+  var dists={};
+  for(var st in CENTROIDS){
+    var c=CENTROIDS[st]; var d=0;
+    for(var k in f) d+=WT[k]*(f[k]-c[k])*(f[k]-c[k]);
+    dists[st]=Math.sqrt(d);
+  }
+  var state;
+  if(lo_L<155) state='H2_only';
+  else if(hi_b>150) state='H2O_only';
+  else if(lo_L<178&&hi_b<145) state='H2+RH';
+  else{
+    var best=null,bd=1e9;
+    for(var s in dists){if(dists[s]<bd){bd=dists[s];best=s;}}
+    state=best;
+  }
+  var h2=null,rh=null;
+  if(state==='H2_only'){
+    var best2=null,bd2=1e9;
+    for(var c2 in H2C){
+      var ref=H2C[c2];
+      var dd=Math.sqrt(Math.pow(f.hi_L-ref.hi_L,2)+Math.pow(f.hi_a-ref.hi_a,2)+Math.pow(f.hi_b-ref.hi_b,2)+Math.pow(f.lo_L-ref.lo_L,2));
+      if(dd<bd2){bd2=dd;best2=c2;}
+    }
+    h2=best2;
+  }else if(state==='H2O_only'){
+    rh=hi_b>160?'90%':hi_b>155?'80%':'70%';
+  }else if(state==='H2+RH'){
+    h2=lo_L<160?'3-4%':lo_L<170?'2-3%':'1-2%';
+    rh=hi_b>142?'>60%':'<60%';
+  }
+  var conf;
+  if(state==='H2_only'&&lo_L<145) conf='high';
+  else if(state==='H2O_only'&&hi_b>155) conf='high';
+  else if(state==='H2+RH'&&lo_L<170) conf='medium';
+  else if(state==='initial'&&lo_L>185&&hi_b>135&&hi_b<145) conf='medium';
+  else conf='low';
+  return{state:state,conf:conf,h2:h2,rh:rh};
+}
+
+// ===== UI =====
+var SC={no_sensor:'#999',initial:'#66bb6a',H2_only:'#ef5350',H2O_only:'#42a5f5','H2+RH':'#ab47bc'};
+var SN={no_sensor:'No Sensor Detected',initial:'Initial State',H2_only:'H₂ Detection',H2O_only:'Humidity Detection','H2+RH':'Simultaneous Detection'};
+var SM={no_sensor:['Sensor not found','#999'],initial:['Status: Standby','#66bb6a'],H2_only:['Warning: H₂ Detected','#ef5350'],H2O_only:['High Humidity Detected','#42a5f5'],'H2+RH':['H₂ + Humidity Detected','#ab47bc']};
+
+function showResult(r){
+  document.getElementById('resArea').classList.remove('hidden');
+  document.getElementById('sDot').style.background=SC[r.state]||'#999';
+  document.getElementById('sName').textContent=SN[r.state]||r.state;
+  var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
+  document.getElementById('sConf').textContent=cm[r.conf]||'';
+  var h2E=document.getElementById('h2Val');
+  if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
+  else{h2E.textContent='Not Detected';h2E.style.color='#222';}
+  var rhE=document.getElementById('rhVal');
+  if(r.rh){rhE.textContent=r.rh;rhE.style.color='#42a5f5';}
+  else{rhE.textContent='Normal';rhE.style.color='#222';}
+  var msg=SM[r.state]||['Unknown','#999'];
+  document.getElementById('stDot').style.background=msg[1];
+  document.getElementById('stTxt').textContent=msg[0];
+  document.getElementById('stTxt').style.color=msg[1];
+}
+
+// ===== CAMERA =====
+var vid=document.getElementById('vid');
+var cvs=document.getElementById('cvs');
+var ctx2d=cvs.getContext('2d');
+var captured=false;
+
+function initCam(){
+  navigator.mediaDevices.getUserMedia({
+    video:{facingMode:'environment',width:{ideal:1280},height:{ideal:960}}
+  }).then(function(stream){
+    vid.srcObject=stream; vid.play();
+  }).catch(function(e){
+    document.getElementById('dbg').textContent='Camera: '+e.message;
+  });
+}
+
+function capture(){
+  if(captured) return;
+  var vw=vid.videoWidth, vh=vid.videoHeight;
+  if(!vw||!vh) return;
+  cvs.width=vw; cvs.height=vh;
+  ctx2d.drawImage(vid,0,0);
+  var url=cvs.toDataURL('image/jpeg',0.92);
+  document.getElementById('capturedImg').src=url;
+  document.getElementById('capturedImg').style.display='block';
+  vid.style.display='none';
+  captured=true;
+  document.getElementById('shutterBtn').classList.add('hidden');
+  document.getElementById('retakeBtn').classList.remove('hidden');
+  document.getElementById('procOverlay').classList.remove('hidden');
+  setTimeout(function(){
+    try{
+      var r=processFrame();
+      showResult(r);
+      document.getElementById('dbg').textContent=r.dbg||'';
+    }catch(e){
+      document.getElementById('dbg').textContent='Error: '+e.message+' '+e.stack;
+      showResult({state:'no_sensor',conf:'-',h2:null,rh:null});
+    }
+    document.getElementById('procOverlay').classList.add('hidden');
+  },100);
+}
+
+function retake(){
+  captured=false;
+  document.getElementById('capturedImg').style.display='none';
+  vid.style.display='block';
+  document.getElementById('shutterBtn').classList.remove('hidden');
+  document.getElementById('retakeBtn').classList.add('hidden');
+  document.getElementById('resArea').classList.add('hidden');
+  document.getElementById('dbg').textContent='';
+}
+
+// ===== IMAGE PROCESSING WITH OPENCV.JS =====
+function processFrame(){
+  var src=cv.imread(cvs);
+  var result=detectAndClassify(src);
+  src.delete();
+  return result;
+}
+
+function detectAndClassify(src){
+  var h=src.rows, w=src.cols;
+
+  // 1. Grayscale + HoughCircles
+  var gray=new cv.Mat();
+  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+  var maxDim=600;
+  var scale=Math.max(h,w)>maxDim?maxDim/Math.max(h,w):1.0;
+  var small=new cv.Mat();
+  if(scale<1) cv.resize(gray,small,new cv.Size(Math.round(w*scale),Math.round(h*scale)));
+  else gray.copyTo(small);
+  var blurred=new cv.Mat();
+  cv.GaussianBlur(small,blurred,new cv.Size(9,9),2);
+  var sh=small.rows,sw=small.cols;
+  var minR=Math.round(Math.min(sh,sw)*0.15);
+  var maxR=Math.round(Math.min(sh,sw)*0.45);
+  var circles=new cv.Mat();
+  cv.HoughCircles(blurred,circles,cv.HOUGH_GRADIENT,1.2,
+    Math.round(Math.min(sh,sw)/2),80,40,minR,maxR);
+  small.delete(); blurred.delete();
+
+  if(circles.cols===0){
+    gray.delete(); circles.delete();
+    return{state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'No circular window found'};
+  }
+
+  // Best circle by inner brightness
+  var bCx=0,bCy=0,bR=0,bBr=-1;
+  for(var i=0;i<circles.cols;i++){
+    var cx=Math.round(circles.data32F[i*3]/scale);
+    var cy=Math.round(circles.data32F[i*3+1]/scale);
+    var r=Math.round(circles.data32F[i*3+2]/scale);
+    var ir=Math.round(r*0.5);
+    var sum=0,cnt=0;
+    for(var dy=-ir;dy<=ir;dy+=4){
+      for(var dx=-ir;dx<=ir;dx+=4){
+        var px=cx+dx,py=cy+dy;
+        if(px>=0&&px<w&&py>=0&&py<h&&dx*dx+dy*dy<=ir*ir){
+          sum+=gray.ucharAt(py,px);cnt++;
+        }
+      }
+    }
+    var avg=cnt>0?sum/cnt:0;
+    if(avg>bBr){bBr=avg;bCx=cx;bCy=cy;bR=r;}
+  }
+  circles.delete(); gray.delete();
+
+  if(bBr<80)
+    return{state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'Circle too dark'};
+
+  // 2. Convert to LAB
+  var bgr=new cv.Mat();
+  cv.cvtColor(src,bgr,cv.COLOR_RGBA2BGR);
+  var lab=new cv.Mat();
+  cv.cvtColor(bgr,lab,cv.COLOR_BGR2Lab);
+  bgr.delete();
+
+  var labData=lab.data;
+  var cols=lab.cols;
+  var innerR=Math.round(bR*0.85);
+  var y1=Math.max(0,bCy-innerR),y2=Math.min(h,bCy+innerR);
+  var x1=Math.max(0,bCx-innerR),x2=Math.min(w,bCx+innerR);
+
+  // 3. Chroma threshold
+  var chromaVals=[];
+  for(var yy=y1;yy<y2;yy+=2){
+    for(var xx=x1;xx<x2;xx+=2){
+      var ddx=xx-bCx,ddy=yy-bCy;
+      if(ddx*ddx+ddy*ddy>innerR*innerR) continue;
+      var ii=(yy*cols+xx)*3;
+      var aa=labData[ii+1]-128,bb=labData[ii+2]-128;
+      chromaVals.push(Math.sqrt(aa*aa+bb*bb));
+    }
+  }
+  if(chromaVals.length<50){
+    lab.delete();
+    return{state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'Too few pixels'};
+  }
+  chromaVals.sort(function(a,b){return a-b;});
+  var p90=chromaVals[Math.floor(chromaVals.length*0.90)];
+  var thr=Math.max(p90*0.6,10);
+
+  // 4. Build mask
+  var mask=new cv.Mat(h,w,cv.CV_8U,new cv.Scalar(0));
+  var mData=mask.data;
+  for(var yy=y1;yy<y2;yy++){
+    for(var xx=x1;xx<x2;xx++){
+      var ddx=xx-bCx,ddy=yy-bCy;
+      if(ddx*ddx+ddy*ddy>innerR*innerR) continue;
+      var ii=(yy*cols+xx)*3;
+      var aa=labData[ii+1]-128,bb=labData[ii+2]-128;
+      if(Math.sqrt(aa*aa+bb*bb)>thr) mData[yy*cols+xx]=255;
+    }
+  }
+
+  var kO=cv.getStructuringElement(cv.MORPH_ELLIPSE,new cv.Size(7,7));
+  var kC=cv.getStructuringElement(cv.MORPH_ELLIPSE,new cv.Size(11,11));
+  cv.morphologyEx(mask,mask,cv.MORPH_OPEN,kO);
+  cv.morphologyEx(mask,mask,cv.MORPH_CLOSE,kC);
+  cv.morphologyEx(mask,mask,cv.MORPH_OPEN,kO);
+  kO.delete(); kC.delete();
+
+  // 5. Find contours
+  var contours=new cv.MatVector();
+  var hier=new cv.Mat();
+  cv.findContours(mask,contours,hier,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+  mask.delete();
+
+  var cArea=Math.PI*bR*bR;
+  var shapes=[];
+  for(var i=0;i<contours.size();i++){
+    var cnt=contours.get(i);
+    var area=cv.contourArea(cnt);
+    if(area<cArea*0.01||area>cArea*0.5) continue;
+    var M=cv.moments(cnt);
+    if(M.m00===0) continue;
+    shapes.push({i:i,area:area,cx:M.m10/M.m00,cy:M.m01/M.m00});
+  }
+  shapes.sort(function(a,b){return b.area-a.area;});
+
+  if(shapes.length<2){
+    lab.delete();contours.delete();hier.delete();
+    return{state:'no_sensor',conf:'-',h2:null,rh:null,
+           dbg:'Found '+shapes.length+' shape(s), need 2. thr='+thr.toFixed(1)};
+  }
+
+  // 6. Extract mean LAB
+  var labs=[];
+  for(var si=0;si<2;si++){
+    var cnt=contours.get(shapes[si].i);
+    var sm=new cv.Mat(h,w,cv.CV_8U,new cv.Scalar(0));
+    var vec=new cv.MatVector();vec.push_back(cnt);
+    cv.drawContours(sm,vec,-1,new cv.Scalar(255),-1);
+    var smData=sm.data;
+    var sL=0,sA=0,sB=0,n=0;
+    var scx=Math.round(shapes[si].cx),scy=Math.round(shapes[si].cy);
+    var rr=Math.round(bR*0.4);
+    for(var yy=Math.max(0,scy-rr);yy<Math.min(h,scy+rr);yy++){
+      for(var xx=Math.max(0,scx-rr);xx<Math.min(w,scx+rr);xx++){
+        if(smData[yy*cols+xx]>0){
+          var ii=(yy*cols+xx)*3;
+          sL+=labData[ii];sA+=labData[ii+1];sB+=labData[ii+2];
+          n++;
+        }
+      }
+    }
+    sm.delete();vec.delete();
+    if(n>0) labs.push({L:sL/n,a:sA/n,b:sB/n});
+    else labs.push({L:128,a:128,b:128});
+  }
+  lab.delete();contours.delete();hier.delete();
+
+  // 7. Sort by b, classify
+  var hi,lo;
+  if(labs[0].b>=labs[1].b){hi=labs[0];lo=labs[1];}
+  else{hi=labs[1];lo=labs[0];}
+
+  var clf=doClassify(hi.L,hi.a,hi.b,lo.L,lo.a,lo.b);
+  clf.dbg='hi=('+hi.L.toFixed(0)+','+hi.a.toFixed(0)+','+hi.b.toFixed(0)+') lo=('+lo.L.toFixed(0)+','+lo.a.toFixed(0)+','+lo.b.toFixed(0)+')';
+  return clf;
+}
+
+// ===== LOAD OPENCV =====
+function onReady(){
+  document.getElementById('loadingScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  initCam();
+}
+var scr=document.createElement('script');
+scr.src='https://docs.opencv.org/4.9.0/opencv.js';
+scr.async=true;
+scr.onload=function(){
+  if(typeof cv!=='undefined'){
+    if(cv.Mat) onReady();
+    else if(cv.then) cv.then(function(o){cv=o;onReady();});
+    else cv['onRuntimeInitialized']=onReady;
+  }
+};
+scr.onerror=function(){
+  document.getElementById('loadingScreen').innerHTML=
+    '<p style="color:#f44336;padding:40px">Failed to load OpenCV.js<br>Check internet</p>';
+};
+document.head.appendChild(scr);
+</script>
+</body>
+</html>
