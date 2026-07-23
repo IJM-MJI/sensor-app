@@ -79,6 +79,18 @@ body{
   color:#fff;font-size:16px;flex-direction:column;gap:12px;
 }
 .dbg{font-size:11px;color:#999;padding:4px 14px;word-break:break-all}
+.cal-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;background:#fff;border-bottom:1px solid #e0e0e0;
+}
+.cal-status{font-size:13px;color:#888}
+.cal-status.active{color:#2e7d32;font-weight:600}
+.cal-btn{
+  padding:8px 16px;border:none;border-radius:8px;
+  font-size:13px;font-weight:600;cursor:pointer;
+}
+.cal-btn.calibrate{background:#2196F3;color:#fff}
+.cal-btn.clear{background:#eee;color:#666;font-size:12px}
 </style>
 </head>
 <body>
@@ -92,6 +104,13 @@ body{
 </div>
 
 <div id="app" class="hidden">
+  <div class="cal-bar">
+    <span class="cal-status" id="calStatus">Not calibrated</span>
+    <span>
+      <button class="cal-btn clear hidden" id="calClearBtn" onclick="clearCal()">Reset</button>
+      <button class="cal-btn calibrate" id="calBtn" onclick="startCal()">Calibrate</button>
+    </span>
+  </div>
   <div class="cam-wrap" id="camWrap">
     <video id="vid" autoplay playsinline muted></video>
     <img id="capturedImg">
@@ -138,9 +157,64 @@ body{
 </div>
 
 <script>
-// ===== CLASSIFIER v3 (two-axis: H2O score + H2 score) =====
-// Baseline from initial state training data (90deg, n=87)
-var BL={hi_L:196.9,hi_a:122.9,hi_b:141.6,lo_L:184.5,lo_a:126.1,lo_b:136.1};
+// ===== CLASSIFIER v4 (calibration-based delta) =====
+// Default baseline from training data (used if not calibrated)
+var BL_DEFAULT={hi_L:196.9,hi_a:122.9,hi_b:141.6,lo_L:184.5,lo_a:126.1,lo_b:136.1};
+var BL=JSON.parse(JSON.stringify(BL_DEFAULT));
+var calibrated=false;
+var calMode=false;
+
+function loadCal(){
+  var s=localStorage.getItem('sensor_cal');
+  if(s){
+    try{
+      var d=JSON.parse(s);
+      BL.hi_L=d.hi_L;BL.hi_a=d.hi_a;BL.hi_b=d.hi_b;
+      BL.lo_L=d.lo_L;BL.lo_a=d.lo_a;BL.lo_b=d.lo_b;
+      calibrated=true;
+      updateCalUI();
+    }catch(e){}
+  }
+}
+
+function saveCal(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
+  BL.hi_L=hi_L;BL.hi_a=hi_a;BL.hi_b=hi_b;
+  BL.lo_L=lo_L;BL.lo_a=lo_a;BL.lo_b=lo_b;
+  calibrated=true;
+  localStorage.setItem('sensor_cal',JSON.stringify(BL));
+  updateCalUI();
+}
+
+function clearCal(){
+  BL=JSON.parse(JSON.stringify(BL_DEFAULT));
+  calibrated=false;
+  localStorage.removeItem('sensor_cal');
+  updateCalUI();
+}
+
+function updateCalUI(){
+  var st=document.getElementById('calStatus');
+  var btn=document.getElementById('calBtn');
+  var clr=document.getElementById('calClearBtn');
+  if(calibrated){
+    st.textContent='Calibrated (hi_b='+BL.hi_b.toFixed(0)+', lo_b='+BL.lo_b.toFixed(0)+')';
+    st.className='cal-status active';
+    btn.textContent='Re-calibrate';
+    clr.classList.remove('hidden');
+  }else{
+    st.textContent='Not calibrated';
+    st.className='cal-status';
+    btn.textContent='Calibrate';
+    clr.classList.add('hidden');
+  }
+}
+
+function startCal(){
+  calMode=true;
+  document.getElementById('calBtn').textContent='Take photo of initial state';
+  document.getElementById('calBtn').style.background='#e65100';
+  document.getElementById('dbg').textContent='Calibration: photograph sensor in initial (no gas) state';
+}
 
 // H2 concentration centroids (90deg, H2_only videos)
 var H2C={
@@ -194,10 +268,10 @@ function doClassify(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
     h2=best2;
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    // RH estimation from droplet color (lo_b channel)
-    if(lo_b>138) rh='20-30%';
-    else if(lo_b>133) rh='30-50%';
-    else if(lo_b>127) rh='50-70%';
+    var db=BL.lo_b-lo_b;
+    if(db<3) rh='20-30%';
+    else if(db<7) rh='30-50%';
+    else if(db<12) rh='50-70%';
     else rh='70-90%';
   }
 
@@ -269,6 +343,15 @@ function capture(){
   setTimeout(function(){
     try{
       var r=processFrame();
+      if(calMode&&r.state!=='no_sensor'){
+        var f=r._raw;
+        saveCal(f.hi_L,f.hi_a,f.hi_b,f.lo_L,f.lo_a,f.lo_b);
+        calMode=false;
+        document.getElementById('calBtn').style.background='#2196F3';
+        document.getElementById('dbg').textContent='Calibrated! hi=('+f.hi_L.toFixed(0)+','+f.hi_a.toFixed(0)+','+f.hi_b.toFixed(0)+') lo=('+f.lo_L.toFixed(0)+','+f.lo_a.toFixed(0)+','+f.lo_b.toFixed(0)+')';
+        retake();
+        return;
+      }
       showResult(r);
       document.getElementById('dbg').textContent=r.dbg||'';
     }catch(e){
@@ -444,7 +527,8 @@ function detectAndClassify(src){
   else{hi=labs[1];lo=labs[0];}
 
   var clf=doClassify(hi.L,hi.a,hi.b,lo.L,lo.a,lo.b);
-  clf.dbg='hi=('+hi.L.toFixed(0)+','+hi.a.toFixed(0)+','+hi.b.toFixed(0)+') lo=('+lo.L.toFixed(0)+','+lo.a.toFixed(0)+','+lo.b.toFixed(0)+') H2O='+clf.h2oS+' H2='+clf.h2S;
+  clf._raw={hi_L:hi.L,hi_a:hi.a,hi_b:hi.b,lo_L:lo.L,lo_a:lo.a,lo_b:lo.b};
+  clf.dbg='hi=('+hi.L.toFixed(0)+','+hi.a.toFixed(0)+','+hi.b.toFixed(0)+') lo=('+lo.L.toFixed(0)+','+lo.a.toFixed(0)+','+lo.b.toFixed(0)+') H2O='+clf.h2oS+' H2='+clf.h2S+(calibrated?' [CAL]':' [DEFAULT]');
   return clf;
 }
 
@@ -452,6 +536,7 @@ function detectAndClassify(src){
 function onReady(){
   document.getElementById('loadingScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
+  loadCal();
   initCam();
 }
 var scr=document.createElement('script');
