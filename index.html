@@ -157,38 +157,41 @@ body{
 </div>
 
 <script>
-// ===== CLASSIFIER v4 (calibration-based delta) =====
-// Default baseline from training data (used if not calibrated)
-var BL_DEFAULT={hi_L:196.9,hi_a:122.9,hi_b:141.6,lo_L:184.5,lo_a:126.1,lo_b:136.1};
+// ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
+// Default baseline from training data initial state (H2_only videos, h2<0.3%)
+var BL_DEFAULT={
+  flame_L:129.8,flame_a:119.1,flame_b:159.3,
+  drop_L:132.8,drop_a:123.1,drop_b:145.6,
+  bg_L:126.9,bg_a:127.4,bg_b:133.5,
+  top_L:129.0,top_a:118.1,top_b:163.0
+};
 var BL=JSON.parse(JSON.stringify(BL_DEFAULT));
 var calibrated=false;
 var calMode=false;
 
 function loadCal(){
-  var s=localStorage.getItem('sensor_cal');
+  var s=localStorage.getItem('sensor_cal_v5');
   if(s){
     try{
       var d=JSON.parse(s);
-      BL.hi_L=d.hi_L;BL.hi_a=d.hi_a;BL.hi_b=d.hi_b;
-      BL.lo_L=d.lo_L;BL.lo_a=d.lo_a;BL.lo_b=d.lo_b;
+      for(var k in BL_DEFAULT) if(d[k]!=null) BL[k]=d[k];
       calibrated=true;
       updateCalUI();
     }catch(e){}
   }
 }
 
-function saveCal(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
-  BL.hi_L=hi_L;BL.hi_a=hi_a;BL.hi_b=hi_b;
-  BL.lo_L=lo_L;BL.lo_a=lo_a;BL.lo_b=lo_b;
+function saveCal(feat){
+  for(var k in BL_DEFAULT) if(feat[k]!=null) BL[k]=feat[k];
   calibrated=true;
-  localStorage.setItem('sensor_cal',JSON.stringify(BL));
+  localStorage.setItem('sensor_cal_v5',JSON.stringify(BL));
   updateCalUI();
 }
 
 function clearCal(){
   BL=JSON.parse(JSON.stringify(BL_DEFAULT));
   calibrated=false;
-  localStorage.removeItem('sensor_cal');
+  localStorage.removeItem('sensor_cal_v5');
   updateCalUI();
 }
 
@@ -197,7 +200,7 @@ function updateCalUI(){
   var btn=document.getElementById('calBtn');
   var clr=document.getElementById('calClearBtn');
   if(calibrated){
-    st.textContent='Calibrated (hi_b='+BL.hi_b.toFixed(0)+', lo_b='+BL.lo_b.toFixed(0)+')';
+    st.textContent='Calibrated (top_a='+BL.top_a.toFixed(1)+')';
     st.className='cal-status active';
     btn.textContent='Re-calibrate';
     clr.classList.remove('hidden');
@@ -216,75 +219,73 @@ function startCal(){
   document.getElementById('dbg').textContent='Calibration: photograph sensor in initial (no gas) state';
 }
 
-// H2 concentration centroids (90deg, H2_only videos)
-var H2C={
-  '1%':{hi_L:206.2,hi_a:124.3,hi_b:136.4,lo_L:138.3},
-  '2%':{hi_L:196.9,hi_a:122.7,hi_b:138.6,lo_L:131.7},
-  '3%':{hi_L:188.2,hi_a:124.5,hi_b:135.9,lo_L:171.9},
-  '4%':{hi_L:198.9,hi_a:125.1,hi_b:134.8,lo_L:160.4}
-};
-
-function h2oScore(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
-  // Flame pink shift (hi_a increase) = strongest H2O signal
-  var s_pink=Math.max(0,hi_a-BL.hi_a)/3.0;
-  // Droplet blue shift (lo_b decrease)
-  var s_blue=Math.max(0,BL.lo_b-lo_b)/4.0;
-  // Flame stays yellow (hi_b not decreasing = not H2)
-  var s_notgreen=Math.max(0,hi_b-BL.hi_b)/5.0;
-  return s_pink*3.0+s_blue*2.0+s_notgreen*1.0;
+function h2Score(f){
+  // Primary: top_a decrease (strongest H2 signal, Δ=-0.8 to -5.4 at 4% H2)
+  var d_top_a=BL.top_a-f.top_a;
+  // Secondary: flame_a decrease
+  var d_flame_a=BL.flame_a-f.flame_a;
+  // Drop should NOT change much with H2 (validation)
+  var d_drop_a=BL.drop_a-f.drop_a;
+  // Flame-only signal (flame changes, drop doesn't) increases confidence
+  var flame_only=Math.max(0,d_flame_a-d_drop_a);
+  // Penalty: if shift_b increases, it's H2O not H2
+  var shift_b_delta=(f.flame_b-f.bg_b)-(BL.flame_b-BL.bg_b);
+  var h2o_penalty=Math.max(0,shift_b_delta)*0.3;
+  return d_top_a*2.0+d_flame_a*1.0+flame_only*0.5-h2o_penalty;
 }
 
-function h2Score(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
-  // Flame green shift (hi_b decrease)
-  var s_green=Math.max(0,BL.hi_b-hi_b)/3.0;
-  // Flame darkening after swap (lo_L decrease)
-  var s_dark=Math.max(0,BL.lo_L-lo_L)/15.0;
-  // Penalty if hi_a is elevated (that's H2O, not H2)
-  var penalty=Math.max(0,hi_a-BL.hi_a-2)*1.0;
-  return s_green*2.5+s_dark*2.0-penalty;
+function h2oScore(f){
+  // H2O increases shift_b (flame_b-bg_b) relative to baseline
+  var shift_b_now=f.flame_b-f.bg_b;
+  var shift_b_bl=BL.flame_b-BL.bg_b;
+  var d_shift_b=shift_b_now-shift_b_bl;
+  // H2O increases drop_b relative to baseline
+  var d_drop_b=f.drop_b-BL.drop_b;
+  // H2O may shift flame-drop_a more negative
+  var fd_a_now=f.flame_a-f.drop_a;
+  var fd_a_bl=BL.flame_a-BL.drop_a;
+  var d_fd_a=fd_a_bl-fd_a_now;
+  return Math.max(0,d_shift_b)*1.5+Math.max(0,d_drop_b)*1.0+Math.max(0,d_fd_a)*0.8;
 }
 
-function doClassify(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b){
-  var h2oS=h2oScore(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b);
-  var h2S=h2Score(hi_L,hi_a,hi_b,lo_L,lo_a,lo_b);
+function doClassify(f){
+  var h2S=h2Score(f);
+  var h2oS=h2oScore(f);
 
-  var H2O_T=4.0, H2_T=4.4;
+  var H2_T=1.0, H2O_T=5.0;
   var state;
-  if(h2oS>=H2O_T&&h2S>=H2_T) state='H2+RH';
+  if(h2S>=H2_T&&h2oS>=H2O_T) state='H2+RH';
   else if(h2oS>=H2O_T) state='H2O_only';
   else if(h2S>=H2_T) state='H2_only';
   else state='initial';
 
-  // H2 concentration estimation
+  // H2 concentration: linear mapping from top_a delta
   var h2=null,rh=null;
   if(state==='H2_only'||state==='H2+RH'){
-    var f={hi_L:hi_L,hi_a:hi_a,hi_b:hi_b,lo_L:lo_L};
-    var best2=null,bd2=1e9;
-    for(var c2 in H2C){
-      var ref=H2C[c2];
-      var dd=Math.sqrt(Math.pow(f.hi_L-ref.hi_L,2)+Math.pow(f.hi_a-ref.hi_a,2)+Math.pow(f.hi_b-ref.hi_b,2)+Math.pow(f.lo_L-ref.lo_L,2));
-      if(dd<bd2){bd2=dd;best2=c2;}
-    }
-    h2=best2;
+    var da=BL.top_a-f.top_a;
+    if(da<1.0) h2='<1%';
+    else if(da<2.0) h2='~1%';
+    else if(da<3.5) h2='~2%';
+    else if(da<5.0) h2='~3%';
+    else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    var db=BL.lo_b-lo_b;
-    if(db<3) rh='20-30%';
-    else if(db<7) rh='30-50%';
-    else if(db<12) rh='50-70%';
+    var db=f.drop_b-BL.drop_b;
+    if(db<2) rh='20-30%';
+    else if(db<4) rh='30-50%';
+    else if(db<7) rh='50-70%';
     else rh='70-90%';
   }
 
-  // Confidence
   var conf;
-  if(state==='H2O_only'&&h2oS>8) conf='high';
-  else if(state==='H2_only'&&h2S>8) conf='high';
-  else if(state==='H2+RH') conf='medium';
-  else if(state==='initial'&&h2oS<1.5&&h2S<1.5) conf='high';
+  if(state==='initial'&&h2S<0.5&&h2oS<2.0) conf='high';
+  else if(state==='H2_only'&&h2S>3.0) conf='high';
+  else if(state==='H2O_only'&&h2oS>10.0) conf='high';
+  else if(state==='H2+RH'&&h2S>2.0&&h2oS>7.0) conf='high';
   else if(state!=='initial') conf='medium';
   else conf='low';
 
-  return{state:state,conf:conf,h2:h2,rh:rh,h2oS:Math.round(h2oS*10)/10,h2S:Math.round(h2S*10)/10};
+  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10};
 }
 
 // ===== UI =====
@@ -297,7 +298,7 @@ function showResult(r){
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
-  document.getElementById('sConf').textContent=cm[r.conf]||'';
+  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+')';
   var h2E=document.getElementById('h2Val');
   if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
   else{h2E.textContent='Not Detected';h2E.style.color='#222';}
@@ -345,10 +346,10 @@ function capture(){
       var r=processFrame();
       if(calMode&&r.state!=='no_sensor'){
         var f=r._raw;
-        saveCal(f.hi_L,f.hi_a,f.hi_b,f.lo_L,f.lo_a,f.lo_b);
+        saveCal(f);
         calMode=false;
         document.getElementById('calBtn').style.background='#2196F3';
-        document.getElementById('dbg').textContent='Calibrated! hi=('+f.hi_L.toFixed(0)+','+f.hi_a.toFixed(0)+','+f.hi_b.toFixed(0)+') lo=('+f.lo_L.toFixed(0)+','+f.lo_a.toFixed(0)+','+f.lo_b.toFixed(0)+')';
+        document.getElementById('dbg').textContent='Calibrated! top_a='+f.top_a.toFixed(1)+' flame_a='+f.flame_a.toFixed(1)+' flame_b='+f.flame_b.toFixed(1);
         retake();
         return;
       }
@@ -356,7 +357,7 @@ function capture(){
       document.getElementById('dbg').textContent=r.dbg||'';
     }catch(e){
       document.getElementById('dbg').textContent='Error: '+e.message+' '+e.stack;
-      showResult({state:'no_sensor',conf:'-',h2:null,rh:null});
+      showResult({state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0});
     }
     document.getElementById('procOverlay').classList.add('hidden');
   },100);
@@ -390,7 +391,7 @@ function processFrame(){
 function detectAndClassify(src){
   var h=src.rows, w=src.cols;
 
-  // 1. Grayscale + HoughCircles
+  // 1. Grayscale + HoughCircles for sensor window detection
   var gray=new cv.Mat();
   cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
   var blurred=new cv.Mat();
@@ -404,7 +405,7 @@ function detectAndClassify(src){
 
   if(circles.cols===0){
     gray.delete(); circles.delete();
-    return{state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'No circular window found'};
+    return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'No circular window found'};
   }
 
   // Best circle by brightness
@@ -429,7 +430,7 @@ function detectAndClassify(src){
   circles.delete(); gray.delete();
 
   if(bBr<80)
-    return{state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'Circle too dark'};
+    return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'Circle too dark'};
 
   // 2. Convert to LAB
   var bgr=new cv.Mat();
@@ -440,95 +441,84 @@ function detectAndClassify(src){
 
   var labData=lab.data;
   var cols=lab.cols;
-  var innerR=Math.round(bR*0.85);
+  var innerR=Math.round(bR*0.90);
   var y1=Math.max(0,bCy-innerR),y2=Math.min(h,bCy+innerR);
   var x1=Math.max(0,bCx-innerR),x2=Math.min(w,bCx+innerR);
   var innerR2=innerR*innerR;
 
-  // 3. Chroma threshold (sample every 2px)
-  var chromaVals=[];
-  for(var yy=y1;yy<y2;yy+=2){
-    for(var xx=x1;xx<x2;xx+=2){
-      var ddx=xx-bCx,ddy=yy-bCy;
-      if(ddx*ddx+ddy*ddy>innerR2) continue;
-      var ii=(yy*cols+xx)*3;
-      var aa=labData[ii+1]-128,bb=labData[ii+2]-128;
-      chromaVals.push(Math.sqrt(aa*aa+bb*bb));
-    }
-  }
-  if(chromaVals.length<30){
-    lab.delete();
-    return{state:'no_sensor',conf:'-',h2:null,rh:null,dbg:'Too few pixels'};
-  }
-  chromaVals.sort(function(a,b){return a-b;});
-  var p90=chromaVals[Math.floor(chromaVals.length*0.90)];
-  var thr=Math.max(p90*0.6,10);
-
-  // 4. Build mask
-  var mask=new cv.Mat(h,w,cv.CV_8U,new cv.Scalar(0));
-  var mData=mask.data;
+  // 3. Top-chroma percentile extraction
+  // Collect all pixels inside sensor circle with their LAB and chroma
+  var allPx=[];
   for(var yy=y1;yy<y2;yy++){
     for(var xx=x1;xx<x2;xx++){
       var ddx=xx-bCx,ddy=yy-bCy;
       if(ddx*ddx+ddy*ddy>innerR2) continue;
       var ii=(yy*cols+xx)*3;
-      var aa=labData[ii+1]-128,bb=labData[ii+2]-128;
-      if(Math.sqrt(aa*aa+bb*bb)>thr) mData[yy*cols+xx]=255;
+      var L=labData[ii],a=labData[ii+1],b=labData[ii+2];
+      var ao=a-128,bo=b-128;
+      var c=Math.sqrt(ao*ao+bo*bo);
+      allPx.push({L:L,a:a,b:b,c:c});
     }
   }
+  lab.delete();
 
-  var kO=cv.getStructuringElement(cv.MORPH_ELLIPSE,new cv.Size(5,5));
-  var kC=cv.getStructuringElement(cv.MORPH_ELLIPSE,new cv.Size(9,9));
-  cv.morphologyEx(mask,mask,cv.MORPH_OPEN,kO);
-  cv.morphologyEx(mask,mask,cv.MORPH_CLOSE,kC);
-  cv.morphologyEx(mask,mask,cv.MORPH_OPEN,kO);
-  kO.delete(); kC.delete();
-
-  // 5. Find contours
-  var contours=new cv.MatVector();
-  var hier=new cv.Mat();
-  cv.findContours(mask,contours,hier,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
-  mask.delete();
-
-  var cArea=Math.PI*bR*bR;
-  var shapes=[];
-  for(var i=0;i<contours.size();i++){
-    var cnt=contours.get(i);
-    var area=cv.contourArea(cnt);
-    if(area<cArea*0.008||area>cArea*0.5) continue;
-    var M=cv.moments(cnt);
-    if(M.m00===0) continue;
-    shapes.push({i:i,area:area,cx:M.m10/M.m00,cy:M.m01/M.m00});
-  }
-  shapes.sort(function(a,b){return b.area-a.area;});
-
-  if(shapes.length<2){
-    lab.delete();contours.delete();hier.delete();
-    return{state:'no_sensor',conf:'-',h2:null,rh:null,
-           dbg:'Found '+shapes.length+' shape(s), need 2'};
+  if(allPx.length<100){
+    return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'Too few pixels ('+allPx.length+')'};
   }
 
-  // 6. Extract mean LAB using cv.mean with mask
-  var labs=[];
-  for(var si=0;si<2;si++){
-    var cnt=contours.get(shapes[si].i);
-    var sm=new cv.Mat(h,w,cv.CV_8U,new cv.Scalar(0));
-    var vec=new cv.MatVector();vec.push_back(cnt);
-    cv.drawContours(sm,vec,-1,new cv.Scalar(255),-1);
-    var meanVal=cv.mean(lab,sm);
-    sm.delete();vec.delete();
-    labs.push({L:meanVal[0],a:meanVal[1],b:meanVal[2]});
+  // Sort by chroma for percentile extraction
+  allPx.sort(function(a,b){return a.c-b.c;});
+  var n=allPx.length;
+
+  // Top 3% chroma pixels -> top measurement
+  var topIdx=Math.floor(n*0.97);
+  var topPx=allPx.slice(topIdx);
+  var topL=0,topA=0,topB=0;
+  for(var i=0;i<topPx.length;i++){topL+=topPx[i].L;topA+=topPx[i].a;topB+=topPx[i].b;}
+  topL/=topPx.length;topA/=topPx.length;topB/=topPx.length;
+
+  // Bottom 50% chroma -> background measurement
+  var bgIdx=Math.floor(n*0.5);
+  var bgPx=allPx.slice(0,bgIdx);
+  var bgL=0,bgA=0,bgB=0;
+  for(var i=0;i<bgPx.length;i++){bgL+=bgPx[i].L;bgA+=bgPx[i].a;bgB+=bgPx[i].b;}
+  bgL/=bgPx.length;bgA/=bgPx.length;bgB/=bgPx.length;
+
+  // Split high-chroma pixels (chroma>15) by b-channel median -> flame (high b) / drop (low b)
+  var hiC=[];
+  for(var i=0;i<n;i++){if(allPx[i].c>15) hiC.push(allPx[i]);}
+
+  var flameL,flameA,flameB,dropL,dropA,dropB;
+  if(hiC.length>20){
+    hiC.sort(function(a,b){return a.b-b.b;});
+    var mid=Math.floor(hiC.length/2);
+    var flamePx=hiC.slice(mid); // higher b = flame
+    var dropPx=hiC.slice(0,mid); // lower b = drop
+    flameL=0;flameA=0;flameB=0;
+    for(var i=0;i<flamePx.length;i++){flameL+=flamePx[i].L;flameA+=flamePx[i].a;flameB+=flamePx[i].b;}
+    flameL/=flamePx.length;flameA/=flamePx.length;flameB/=flamePx.length;
+    dropL=0;dropA=0;dropB=0;
+    for(var i=0;i<dropPx.length;i++){dropL+=dropPx[i].L;dropA+=dropPx[i].a;dropB+=dropPx[i].b;}
+    dropL/=dropPx.length;dropA/=dropPx.length;dropB/=dropPx.length;
+  }else{
+    flameL=topL;flameA=topA;flameB=topB;
+    dropL=topL;dropA=topA;dropB=topB;
   }
-  lab.delete();contours.delete();hier.delete();
 
-  // 7. Sort by b, classify
-  var hi,lo;
-  if(labs[0].b>=labs[1].b){hi=labs[0];lo=labs[1];}
-  else{hi=labs[1];lo=labs[0];}
+  // 4. Classify
+  var feat={
+    flame_L:flameL,flame_a:flameA,flame_b:flameB,
+    drop_L:dropL,drop_a:dropA,drop_b:dropB,
+    bg_L:bgL,bg_a:bgA,bg_b:bgB,
+    top_L:topL,top_a:topA,top_b:topB
+  };
 
-  var clf=doClassify(hi.L,hi.a,hi.b,lo.L,lo.a,lo.b);
-  clf._raw={hi_L:hi.L,hi_a:hi.a,hi_b:hi.b,lo_L:lo.L,lo_a:lo.a,lo_b:lo.b};
-  clf.dbg='hi=('+hi.L.toFixed(0)+','+hi.a.toFixed(0)+','+hi.b.toFixed(0)+') lo=('+lo.L.toFixed(0)+','+lo.a.toFixed(0)+','+lo.b.toFixed(0)+') H2O='+clf.h2oS+' H2='+clf.h2S+(calibrated?' [CAL]':' [DEFAULT]');
+  var clf=doClassify(feat);
+  clf._raw=feat;
+  clf.dbg='top=('+topL.toFixed(0)+','+topA.toFixed(1)+','+topB.toFixed(0)+
+    ') fl=('+flameA.toFixed(1)+','+flameB.toFixed(0)+
+    ') bg=('+bgA.toFixed(1)+','+bgB.toFixed(0)+
+    ') H2='+clf.h2S+' H2O='+clf.h2oS+(calibrated?' [CAL]':' [DEF]');
   return clf;
 }
 
