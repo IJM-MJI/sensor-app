@@ -252,6 +252,12 @@ function doClassify(f){
   var h2S=h2Score(f);
   var h2oS=h2oScore(f);
 
+  // Sanity check: extremely negative H2 score indicates abnormal condition
+  // (white light flooding, no sample visible, etc.)
+  if(h2S<-10){
+    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10};
+  }
+
   var H2_T=1.0, H2O_T=5.0;
   var state;
   if(h2S>=H2_T&&h2oS>=H2O_T) state='H2+RH';
@@ -270,11 +276,14 @@ function doClassify(f){
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    var db=f.drop_b-BL.drop_b;
-    if(db<2) rh='20-30%';
-    else if(db<4) rh='30-50%';
-    else if(db<7) rh='50-70%';
-    else rh='70-90%';
+    if(h2oS<7) rh='~20%';
+    else if(h2oS<10) rh='~30%';
+    else if(h2oS<15) rh='~40%';
+    else if(h2oS<22) rh='~50%';
+    else if(h2oS<30) rh='~60%';
+    else if(h2oS<38) rh='~70%';
+    else if(h2oS<48) rh='~80%';
+    else rh='~90%';
   }
 
   var conf;
@@ -289,9 +298,9 @@ function doClassify(f){
 }
 
 // ===== UI =====
-var SC={no_sensor:'#999',initial:'#66bb6a',H2_only:'#ef5350',H2O_only:'#42a5f5','H2+RH':'#ab47bc'};
-var SN={no_sensor:'No Sensor Detected',initial:'Initial State',H2_only:'H₂ Detection',H2O_only:'Humidity Detection','H2+RH':'Simultaneous Detection'};
-var SM={no_sensor:['Sensor not found','#999'],initial:['Status: Standby','#66bb6a'],H2_only:['Warning: H₂ Detected','#ef5350'],H2O_only:['High Humidity Detected','#42a5f5'],'H2+RH':['H₂ + Humidity Detected','#ab47bc']};
+var SC={no_sensor:'#999',no_sample:'#ff9800',initial:'#66bb6a',H2_only:'#ef5350',H2O_only:'#42a5f5','H2+RH':'#ab47bc'};
+var SN={no_sensor:'No Sensor Detected',no_sample:'No Sample Detected',initial:'Initial State',H2_only:'H₂ Detection',H2O_only:'Humidity Detection','H2+RH':'Simultaneous Detection'};
+var SM={no_sensor:['Sensor not found','#999'],no_sample:['Sample not visible — check lighting','#ff9800'],initial:['Status: Standby','#66bb6a'],H2_only:['Warning: H₂ Detected','#ef5350'],H2O_only:['High Humidity Detected','#42a5f5'],'H2+RH':['H₂ + Humidity Detected','#ab47bc']};
 
 function showResult(r){
   document.getElementById('resArea').classList.remove('hidden');
@@ -300,10 +309,12 @@ function showResult(r){
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
   document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+')';
   var h2E=document.getElementById('h2Val');
-  if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
+  if(r.state==='no_sample'||r.state==='no_sensor'){h2E.textContent='-';h2E.style.color='#999';}
+  else if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
   else{h2E.textContent='Not Detected';h2E.style.color='#222';}
   var rhE=document.getElementById('rhVal');
-  if(r.rh){rhE.textContent=r.rh;rhE.style.color='#42a5f5';}
+  if(r.state==='no_sample'||r.state==='no_sensor'){rhE.textContent='-';rhE.style.color='#999';}
+  else if(r.rh){rhE.textContent=r.rh;rhE.style.color='#42a5f5';}
   else{rhE.textContent='Normal';rhE.style.color='#222';}
   var msg=SM[r.state]||['Unknown','#999'];
   document.getElementById('stDot').style.background=msg[1];
