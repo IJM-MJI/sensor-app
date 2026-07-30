@@ -276,13 +276,18 @@ function doClassify(f){
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    if(h2oS<7) rh='~20%';
-    else if(h2oS<10) rh='~30%';
-    else if(h2oS<15) rh='~40%';
-    else if(h2oS<22) rh='~50%';
-    else if(h2oS<30) rh='~60%';
-    else if(h2oS<38) rh='~70%';
-    else if(h2oS<48) rh='~80%';
+    // RH estimation from hue shift (yellow->orange->purple = increasing RH)
+    // hue_metric = (b - a): positive=yellow(low RH), decreasing=toward purple(high RH)
+    var bl_hue=(BL.top_b-BL.top_a+BL.drop_b-BL.drop_a)/2;
+    var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
+    var dh=bl_hue-cur_hue;
+    if(dh<3) rh='~20%';
+    else if(dh<6) rh='~30%';
+    else if(dh<10) rh='~40%';
+    else if(dh<14) rh='~50%';
+    else if(dh<19) rh='~60%';
+    else if(dh<25) rh='~70%';
+    else if(dh<32) rh='~80%';
     else rh='~90%';
   }
 
