@@ -259,9 +259,18 @@ function doClassify(f){
   }
 
   var H2_T=1.0, H2O_T=5.0;
+
+  // Compute hue shift for RH estimation (yellow->purple = increasing RH)
+  var bl_hue=(BL.top_b-BL.top_a+BL.drop_b-BL.drop_a)/2;
+  var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
+  var dh=bl_hue-cur_hue;
+
+  // H2O only counts as detected if hue shift indicates RH >= 40% (dh >= 6)
+  var h2o_real=h2oS>=H2O_T&&dh>=6;
+
   var state;
-  if(h2S>=H2_T&&h2oS>=H2O_T) state='H2+RH';
-  else if(h2oS>=H2O_T) state='H2O_only';
+  if(h2S>=H2_T&&h2o_real) state='H2+RH';
+  else if(h2o_real) state='H2O_only';
   else if(h2S>=H2_T) state='H2_only';
   else state='initial';
 
@@ -276,14 +285,7 @@ function doClassify(f){
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    // RH estimation from hue shift (yellow->orange->purple = increasing RH)
-    // hue_metric = (b - a): positive=yellow(low RH), decreasing=toward purple(high RH)
-    var bl_hue=(BL.top_b-BL.top_a+BL.drop_b-BL.drop_a)/2;
-    var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
-    var dh=bl_hue-cur_hue;
-    if(dh<3) rh='~20%';
-    else if(dh<6) rh='~30%';
-    else if(dh<10) rh='~40%';
+    if(dh<10) rh='~40%';
     else if(dh<14) rh='~50%';
     else if(dh<19) rh='~60%';
     else if(dh<25) rh='~70%';
