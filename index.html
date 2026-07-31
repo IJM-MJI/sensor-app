@@ -220,28 +220,21 @@ function startCal(){
 }
 
 function h2Score(f){
-  // Primary: top_a decrease (strongest H2 signal, Δ=-0.8 to -5.4 at 4% H2)
-  var d_top_a=BL.top_a-f.top_a;
-  // Secondary: flame_a decrease
-  var d_flame_a=BL.flame_a-f.flame_a;
-  // Drop should NOT change much with H2 (validation)
-  var d_drop_a=BL.drop_a-f.drop_a;
-  // Flame-only signal (flame changes, drop doesn't) increases confidence
+  var d_bg_a=BL.bg_a-f.bg_a;
+  var d_top_a=(BL.top_a-f.top_a)-d_bg_a;
+  var d_flame_a=(BL.flame_a-f.flame_a)-d_bg_a;
+  var d_drop_a=(BL.drop_a-f.drop_a)-d_bg_a;
   var flame_only=Math.max(0,d_flame_a-d_drop_a);
-  // Penalty: if shift_b increases, it's H2O not H2
   var shift_b_delta=(f.flame_b-f.bg_b)-(BL.flame_b-BL.bg_b);
   var h2o_penalty=Math.max(0,shift_b_delta)*0.3;
   return d_top_a*2.0+d_flame_a*1.0+flame_only*0.5-h2o_penalty;
 }
 
 function h2oScore(f){
-  // H2O increases shift_b (flame_b-bg_b) relative to baseline
   var shift_b_now=f.flame_b-f.bg_b;
   var shift_b_bl=BL.flame_b-BL.bg_b;
   var d_shift_b=shift_b_now-shift_b_bl;
-  // H2O increases drop_b relative to baseline
-  var d_drop_b=f.drop_b-BL.drop_b;
-  // H2O may shift flame-drop_a more negative
+  var d_drop_b=(f.drop_b-f.bg_b)-(BL.drop_b-BL.bg_b);
   var fd_a_now=f.flame_a-f.drop_a;
   var fd_a_bl=BL.flame_a-BL.drop_a;
   var d_fd_a=fd_a_bl-fd_a_now;
@@ -256,7 +249,7 @@ function doClassify(f){
     return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10};
   }
 
-  var H2_T=1.0;
+  var H2_T=3.0;
   // Absolute hue: yellow(dry)=high, orange/purple(humid)=low
   var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
   // H2O detected when sensor color is non-yellow (hue < 25 = RH >= 40%)
@@ -527,10 +520,11 @@ function detectAndClassify(src){
 
   var clf=doClassify(feat);
   clf._raw=feat;
-  clf.dbg='top=('+topL.toFixed(0)+','+topA.toFixed(1)+','+topB.toFixed(0)+
+  clf.dbg='top=('+topA.toFixed(1)+','+topB.toFixed(0)+
+    ') dr=('+dropA.toFixed(1)+','+dropB.toFixed(0)+
     ') fl=('+flameA.toFixed(1)+','+flameB.toFixed(0)+
     ') bg=('+bgA.toFixed(1)+','+bgB.toFixed(0)+
-    ') H2='+clf.h2S+' H2O='+clf.h2oS+(calibrated?' [CAL]':' [DEF]');
+    ') H2='+clf.h2S+' H2O='+clf.h2oS+' hue='+clf.hue+(calibrated?' [CAL]':' [DEF]');
   return clf;
 }
 
