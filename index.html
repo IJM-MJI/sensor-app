@@ -231,14 +231,11 @@ function h2Score(f){
 }
 
 function h2oScore(f){
-  var shift_b_now=f.flame_b-f.bg_b;
-  var shift_b_bl=BL.flame_b-BL.bg_b;
-  var d_shift_b=shift_b_now-shift_b_bl;
-  var d_drop_b=(f.drop_b-f.bg_b)-(BL.drop_b-BL.bg_b);
-  var fd_a_now=f.flame_a-f.drop_a;
-  var fd_a_bl=BL.flame_a-BL.drop_a;
-  var d_fd_a=fd_a_bl-fd_a_now;
-  return Math.max(0,d_shift_b)*1.5+Math.max(0,d_drop_b)*1.0+Math.max(0,d_fd_a)*0.8;
+  var d_bg_a=BL.bg_a-f.bg_a;
+  var d_bg_b=BL.bg_b-f.bg_b;
+  var pink=Math.max(0,(f.top_a-BL.top_a)+d_bg_a)+Math.max(0,(f.flame_a-BL.flame_a)+d_bg_a);
+  var blue=Math.max(0,(BL.drop_b-f.drop_b)-d_bg_b);
+  return pink*1.5+blue*1.0;
 }
 
 function doClassify(f){
@@ -250,10 +247,8 @@ function doClassify(f){
   }
 
   var H2_T=3.0;
-  // Absolute hue: yellow(dry)=high, orange/purple(humid)=low
   var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
-  // H2O detected when sensor color is non-yellow (hue < 25 = RH >= 40%)
-  var h2o_real=cur_hue<25;
+  var h2o_real=cur_hue<25||(calibrated&&h2oS>=5.0);
 
   var state;
   if(h2S>=H2_T&&h2o_real) state='H2+RH';
@@ -271,7 +266,8 @@ function doClassify(f){
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    if(cur_hue>=18) rh='~40%';
+    if(cur_hue>=25) rh='~30%';
+    else if(cur_hue>=18) rh='~40%';
     else if(cur_hue>=14) rh='~50%';
     else if(cur_hue>=10) rh='~60%';
     else if(cur_hue>=6) rh='~70%';
