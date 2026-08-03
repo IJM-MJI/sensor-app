@@ -242,13 +242,14 @@ function doClassify(f){
   var h2S=h2Score(f);
   var h2oS=h2oScore(f);
 
-  if(h2S<-10){
-    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10};
-  }
-
   var H2_T=3.0;
   var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
-  var h2o_real=cur_hue<25||(calibrated&&h2oS>=5.0);
+  var dropS=Math.max(0,(f.drop_a-BL.drop_a)+(BL.bg_a-f.bg_a));
+  var h2o_real=cur_hue<25||dropS>=3.0;
+
+  if(h2S<-10&&!h2o_real){
+    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10};
+  }
 
   var state;
   if(h2S>=H2_T&&h2o_real) state='H2+RH';
@@ -266,25 +267,25 @@ function doClassify(f){
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    if(cur_hue>=25) rh='~30%';
-    else if(cur_hue>=18) rh='~40%';
-    else if(cur_hue>=14) rh='~50%';
-    else if(cur_hue>=10) rh='~60%';
-    else if(cur_hue>=6) rh='~70%';
-    else if(cur_hue>=2) rh='~80%';
-    else rh='~90%';
+    if(cur_hue<6) rh='~80%+';
+    else if(cur_hue<10) rh='~70%';
+    else if(cur_hue<14) rh='~60%';
+    else if(cur_hue<18) rh='~50%';
+    else if(cur_hue<25) rh='~40%';
+    else if(dropS>=5) rh='~40%';
+    else rh='~30%';
   }
 
   var conf;
   var bl_hue=(BL.top_b-BL.top_a+BL.drop_b-BL.drop_a)/2;
   if(state==='initial'&&h2S<0.5&&Math.abs(cur_hue-bl_hue)<3) conf='high';
   else if(state==='H2_only'&&h2S>3.0) conf='high';
-  else if(state==='H2O_only'&&cur_hue<15) conf='high';
-  else if(state==='H2+RH'&&h2S>2.0&&cur_hue<15) conf='high';
+  else if(state==='H2O_only'&&(cur_hue<15||dropS>=5)) conf='high';
+  else if(state==='H2+RH'&&h2S>2.0&&(cur_hue<15||dropS>=5)) conf='high';
   else if(state!=='initial') conf='medium';
   else conf='low';
 
-  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hue:Math.round(cur_hue*10)/10};
+  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hue:Math.round(cur_hue*10)/10,dropS:Math.round(dropS*10)/10};
 }
 
 // ===== UI =====
@@ -297,7 +298,7 @@ function showResult(r){
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
-  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hue='+r.hue+')';
+  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hue='+r.hue+' drop='+r.dropS+')';
   var h2E=document.getElementById('h2Val');
   if(r.state==='no_sample'||r.state==='no_sensor'){h2E.textContent='-';h2E.style.color='#999';}
   else if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
