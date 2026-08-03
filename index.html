@@ -267,13 +267,13 @@ function doClassify(f){
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    if(cur_hue<6) rh='~80%+';
-    else if(cur_hue<10) rh='~70%';
-    else if(cur_hue<14) rh='~60%';
+    if(cur_hue<6) rh='≥80%';
+    else if(cur_hue<11) rh='~70%';
+    else if(cur_hue<15) rh='~60%';
     else if(cur_hue<18) rh='~50%';
     else if(cur_hue<25) rh='~40%';
-    else if(dropS>=5) rh='~40%';
-    else rh='~30%';
+    else if(dropS>=3) rh='~30%';
+    else rh='~20%';
   }
 
   var conf;
