@@ -245,12 +245,13 @@ function doClassify(f){
   var H2_T=3.0;
   var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
   var bl_hue=(BL.top_b-BL.top_a+BL.drop_b-BL.drop_a)/2;
-  var hd=bl_hue-cur_hue;
+  var bgs=(BL.bg_b-BL.bg_a)-(f.bg_b-f.bg_a);
+  var hd=bl_hue-cur_hue-bgs;
   var dropS=Math.max(0,(f.drop_a-BL.drop_a)+(BL.bg_a-f.bg_a));
   var h2o_real=hd>6||dropS>=2.5;
 
   if(h2S<-10&&!h2o_real){
-    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hue:Math.round(cur_hue*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10};
+    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10};
   }
 
   var state;
@@ -285,7 +286,7 @@ function doClassify(f){
   else if(state!=='initial') conf='medium';
   else conf='low';
 
-  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hue:Math.round(cur_hue*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10};
+  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10};
 }
 
 // ===== UI =====
@@ -298,7 +299,7 @@ function showResult(r){
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
-  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hue='+r.hue+' hd='+r.hd+' drop='+r.dropS+')';
+  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hd='+r.hd+' drop='+r.dropS+' bgs='+r.bgs+')';
   var h2E=document.getElementById('h2Val');
   if(r.state==='no_sample'||r.state==='no_sensor'){h2E.textContent='-';h2E.style.color='#999';}
   else if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
