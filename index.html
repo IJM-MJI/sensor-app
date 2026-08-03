@@ -269,11 +269,11 @@ function doClassify(f){
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    var rs=hd+(dropS>=3?3:0);
-    if(rs>18) rh='≥80%';
-    else if(rs>13) rh='~70%';
-    else if(rs>9) rh='~60%';
-    else if(rs>6) rh='~50%';
+    var rs=hd+(dropS>=3?3:0)+(h2oS>=12?3:0);
+    if(rs>15) rh='≥80%';
+    else if(rs>11) rh='~70%';
+    else if(rs>8) rh='~60%';
+    else if(rs>5.5) rh='~50%';
     else rh='~40%';
   }
 
