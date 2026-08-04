@@ -92,6 +92,29 @@ body{
 }
 .cal-btn.calibrate{background:#2196F3;color:#fff}
 .cal-btn.clear{background:#eee;color:#666;font-size:12px}
+.roi-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 14px;background:#fff;border-bottom:1px solid #e0e0e0;
+}
+.roi-bar label{font-size:13px;color:#888}
+.roi-bar .roi-btn{
+  padding:6px 14px;border:none;border-radius:8px;
+  font-size:13px;font-weight:600;cursor:pointer;
+  background:#FF9800;color:#fff;
+}
+.roi-bar .roi-btn.active{background:#e65100}
+.roi-bar .roi-btn.set{background:#4CAF50}
+#roiGuide{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  display:none;z-index:5;cursor:crosshair;
+}
+#roiOverlay{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  pointer-events:none;z-index:4;display:none;
+}
+.roi-slider{display:none;padding:6px 14px;background:#fff;border-bottom:1px solid #e0e0e0}
+.roi-slider input{width:100%}
+.roi-slider span{font-size:12px;color:#888}
 </style>
 </head>
 <body>
@@ -112,11 +135,24 @@ body{
       <button class="cal-btn calibrate" id="calBtn" onclick="startCal()">Calibrate</button>
     </span>
   </div>
+  <div class="roi-bar">
+    <label id="roiStatus">ROI: Auto (HoughCircles)</label>
+    <span>
+      <button class="roi-btn clear hidden" id="roiClearBtn" onclick="clearROI()">Reset</button>
+      <button class="roi-btn" id="roiBtn" onclick="startROI()">Set ROI</button>
+    </span>
+  </div>
+  <div class="roi-slider hidden" id="roiSliderWrap">
+    <span>Radius: <span id="roiRadLabel">30%</span></span>
+    <input type="range" id="roiSlider" min="10" max="45" value="30" oninput="updateROIRadius(this.value)">
+  </div>
   <div class="cam-wrap" id="camWrap">
     <video id="vid" autoplay playsinline muted></video>
     <img id="capturedImg">
     <canvas id="cvs"></canvas>
     <canvas id="dbgCvs"></canvas>
+    <canvas id="roiOverlay"></canvas>
+    <div id="roiGuide"></div>
     <div id="procOverlay" class="proc-overlay hidden">
       <div class="spin"></div>
       <span>Analyzing...</span>
@@ -318,6 +354,99 @@ function showResult(r){
   document.getElementById('stTxt').style.color=msg[1];
 }
 
+// ===== MANUAL ROI =====
+var manualROI=null; // {cx:0-1, cy:0-1, rPct:30} percentage-based
+var roiMode=false;
+
+function loadROI(){
+  var s=localStorage.getItem('sensor_roi');
+  if(s){
+    try{ manualROI=JSON.parse(s); updateROIUI(); }catch(e){}
+  }
+}
+
+function saveROI(){
+  localStorage.setItem('sensor_roi',JSON.stringify(manualROI));
+  updateROIUI();
+}
+
+function clearROI(){
+  manualROI=null;
+  roiMode=false;
+  localStorage.removeItem('sensor_roi');
+  updateROIUI();
+  document.getElementById('roiGuide').style.display='none';
+  document.getElementById('roiOverlay').style.display='none';
+  document.getElementById('roiSliderWrap').classList.add('hidden');
+}
+
+function updateROIUI(){
+  var st=document.getElementById('roiStatus');
+  var btn=document.getElementById('roiBtn');
+  var clr=document.getElementById('roiClearBtn');
+  if(manualROI){
+    st.textContent='ROI: Manual ('+Math.round(manualROI.rPct)+'%)';
+    btn.textContent='Re-set ROI';
+    btn.className='roi-btn set';
+    clr.classList.remove('hidden');
+    drawROIOverlay();
+  }else{
+    st.textContent='ROI: Auto (HoughCircles)';
+    btn.textContent='Set ROI';
+    btn.className='roi-btn';
+    clr.classList.add('hidden');
+  }
+}
+
+function startROI(){
+  roiMode=true;
+  document.getElementById('roiBtn').textContent='Tap sensor center';
+  document.getElementById('roiBtn').className='roi-btn active';
+  document.getElementById('roiGuide').style.display='block';
+  document.getElementById('roiSliderWrap').classList.remove('hidden');
+}
+
+function drawROIOverlay(){
+  if(!manualROI) return;
+  var oc=document.getElementById('roiOverlay');
+  var wrap=document.getElementById('camWrap');
+  var ww=wrap.clientWidth, wh=wrap.clientHeight;
+  oc.width=ww; oc.height=wh;
+  oc.style.display='block';
+  var ox=oc.getContext('2d');
+  ox.clearRect(0,0,ww,wh);
+  var cx=manualROI.cx*ww, cy=manualROI.cy*wh;
+  var r=manualROI.rPct/100*Math.min(ww,wh);
+  ox.strokeStyle='rgba(0,255,0,0.8)';ox.lineWidth=2;
+  ox.beginPath();ox.arc(cx,cy,r,0,Math.PI*2);ox.stroke();
+  ox.strokeStyle='rgba(0,255,0,0.4)';ox.lineWidth=1;
+  ox.beginPath();ox.moveTo(cx-r,cy);ox.lineTo(cx+r,cy);ox.stroke();
+  ox.beginPath();ox.moveTo(cx,cy-r);ox.lineTo(cx,cy+r);ox.stroke();
+}
+
+document.getElementById('roiGuide').addEventListener('click',function(e){
+  if(!roiMode) return;
+  var rect=this.getBoundingClientRect();
+  var x=(e.clientX-rect.left)/rect.width;
+  var y=(e.clientY-rect.top)/rect.height;
+  var rVal=parseInt(document.getElementById('roiSlider').value);
+  manualROI={cx:x,cy:y,rPct:rVal};
+  saveROI();
+  roiMode=false;
+  document.getElementById('roiGuide').style.display='none';
+  document.getElementById('roiSliderWrap').classList.add('hidden');
+  drawROIOverlay();
+});
+
+function updateROIRadius(val){
+  document.getElementById('roiRadLabel').textContent=val+'%';
+  if(manualROI){
+    manualROI.rPct=parseInt(val);
+    saveROI();
+    drawROIOverlay();
+  }
+}
+
 // ===== CAMERA =====
 var vid=document.getElementById('vid');
 var cvs=document.getElementById('cvs');
@@ -343,6 +472,7 @@ function capture(){
   var url=cvs.toDataURL('image/jpeg',0.92);
   document.getElementById('capturedImg').src=url;
   document.getElementById('capturedImg').style.display='block';
+  document.getElementById('roiOverlay').style.display='none';
   vid.style.display='none';
   captured=true;
   document.getElementById('shutterBtn').classList.add('hidden');
@@ -380,6 +510,7 @@ function retake(){
   document.getElementById('retakeBtn').classList.add('hidden');
   document.getElementById('resArea').classList.add('hidden');
   document.getElementById('dbg').textContent='';
+  if(manualROI) drawROIOverlay();
 }
 
 // ===== IMAGE PROCESSING WITH OPENCV.JS =====
@@ -399,48 +530,57 @@ function processFrame(){
 
 function detectAndClassify(src){
   var h=src.rows, w=src.cols;
+  var bCx,bCy,bR,nCircles=0,bBr=255,roiSource='auto';
 
-  // 1. Grayscale + HoughCircles for sensor window detection
-  var gray=new cv.Mat();
-  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
-  var blurred=new cv.Mat();
-  cv.GaussianBlur(gray,blurred,new cv.Size(9,9),2);
-  var minR=Math.round(Math.min(h,w)*0.12);
-  var maxR=Math.round(Math.min(h,w)*0.36);
-  var circles=new cv.Mat();
-  cv.HoughCircles(blurred,circles,cv.HOUGH_GRADIENT,1.2,
-    Math.round(Math.min(h,w)/3),80,40,minR,maxR);
-  blurred.delete();
+  if(manualROI){
+    // Manual ROI: fixed position
+    bCx=Math.round(manualROI.cx*w);
+    bCy=Math.round(manualROI.cy*h);
+    bR=Math.round(manualROI.rPct/100*Math.min(h,w));
+    nCircles=1;
+    roiSource='manual';
+  }else{
+    // Auto: HoughCircles
+    var gray=new cv.Mat();
+    cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+    var blurred=new cv.Mat();
+    cv.GaussianBlur(gray,blurred,new cv.Size(9,9),2);
+    var minR=Math.round(Math.min(h,w)*0.15);
+    var maxR=Math.round(Math.min(h,w)*0.45);
+    var circles=new cv.Mat();
+    cv.HoughCircles(blurred,circles,cv.HOUGH_GRADIENT,1.2,
+      Math.round(Math.min(h,w)/2),80,40,minR,maxR);
+    blurred.delete();
 
-  if(circles.cols===0){
-    gray.delete(); circles.delete();
-    return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'No circular window found'};
-  }
+    if(circles.cols===0){
+      gray.delete(); circles.delete();
+      return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'No circular window found'};
+    }
 
-  // Best circle by brightness (sensor window is brightest circular area)
-  var bCx=0,bCy=0,bR=0,bBr=-1;
-  for(var i=0;i<circles.cols;i++){
-    var cx=Math.round(circles.data32F[i*3]);
-    var cy=Math.round(circles.data32F[i*3+1]);
-    var r=Math.round(circles.data32F[i*3+2]);
-    var ir=Math.round(r*0.5);
-    var sum=0,cnt=0;
-    for(var dy=-ir;dy<=ir;dy+=3){
-      for(var dx=-ir;dx<=ir;dx+=3){
-        var px=cx+dx,py=cy+dy;
-        if(px>=0&&px<w&&py>=0&&py<h&&dx*dx+dy*dy<=ir*ir){
-          sum+=gray.ucharAt(py,px);cnt++;
+    bCx=0;bCy=0;bR=0;bBr=-1;
+    for(var i=0;i<circles.cols;i++){
+      var cx=Math.round(circles.data32F[i*3]);
+      var cy=Math.round(circles.data32F[i*3+1]);
+      var r=Math.round(circles.data32F[i*3+2]);
+      var ir=Math.round(r*0.5);
+      var sum=0,cnt=0;
+      for(var dy=-ir;dy<=ir;dy+=3){
+        for(var dx=-ir;dx<=ir;dx+=3){
+          var px=cx+dx,py=cy+dy;
+          if(px>=0&&px<w&&py>=0&&py<h&&dx*dx+dy*dy<=ir*ir){
+            sum+=gray.ucharAt(py,px);cnt++;
+          }
         }
       }
-      }
-    var avg=cnt>0?sum/cnt:0;
-    if(avg>bBr){bBr=avg;bCx=cx;bCy=cy;bR=r;}
-  }
-  var nCircles=circles.cols;
-  circles.delete(); gray.delete();
+      var avg=cnt>0?sum/cnt:0;
+      if(avg>bBr){bBr=avg;bCx=cx;bCy=cy;bR=r;}
+    }
+    nCircles=circles.cols;
+    circles.delete(); gray.delete();
 
-  if(bBr<80)
-    return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'Circle too dark'};
+    if(bBr<80)
+      return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'Circle too dark'};
+  }
 
   // 2. Convert to LAB
   var bgr=new cv.Mat();
@@ -451,7 +591,7 @@ function detectAndClassify(src){
 
   var labData=lab.data;
   var cols=lab.cols;
-  var innerR=Math.round(bR*0.80);
+  var innerR=Math.round(bR*0.90);
   var y1=Math.max(0,bCy-innerR),y2=Math.min(h,bCy+innerR);
   var x1=Math.max(0,bCx-innerR),x2=Math.min(w,bCx+innerR);
   var innerR2=innerR*innerR;
@@ -532,9 +672,9 @@ function detectAndClassify(src){
     ') dr=('+dropA.toFixed(1)+','+dropB.toFixed(0)+
     ') fl=('+flameA.toFixed(1)+','+flameB.toFixed(0)+
     ') bg=('+bgA.toFixed(1)+','+bgB.toFixed(0)+
-    ') H2='+clf.h2S+' H2O='+clf.h2oS+' hue='+clf.hue+(calibrated?' [CAL]':' [DEF]');
+    ') H2='+clf.h2S+' H2O='+clf.h2oS+' hue='+clf.hue+(calibrated?' [CAL]':' [DEF]')+' ['+roiSource+']';
   clf._dbgGeo={cx:bCx,cy:bCy,r:bR,innerR:innerR,w:w,h:h,
-    totalCircles:nCircles,brightness:Math.round(bBr),
+    totalCircles:nCircles,brightness:Math.round(bBr),roiSource:roiSource,
     nPx:n,nTop:topPx.length,nBg:bgPx.length,nHiC:hiC.length,
     pixels:allPx};
   return clf;
@@ -574,8 +714,9 @@ function drawDebugOverlay(r){
   dx.font='bold 14px sans-serif';
   dx.fillStyle='rgba(0,0,0,0.7)';
   dx.fillRect(4,4,220,130);
-  dx.fillStyle='#fff';dx.fillText('HoughCircles: '+g.totalCircles+' found',10,20);
-  dx.fillText('Best: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness,10,36);
+  var src=g.roiSource==='manual'?'Manual ROI':'HoughCircles: '+g.totalCircles+' found';
+  dx.fillStyle='#fff';dx.fillText(src,10,20);
+  dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness,10,36);
   dx.fillText('innerR='+g.innerR+' (0.90x)',10,52);
   dx.fillText('Pixels: '+g.nPx+' total',10,68);
   dx.fillStyle='rgba(255,0,0,0.9)';dx.fillText('Top 3%: '+g.nTop,10,84);
@@ -589,6 +730,7 @@ function onReady(){
   document.getElementById('loadingScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   loadCal();
+  loadROI();
   initCam();
 }
 var scr=document.createElement('script');
