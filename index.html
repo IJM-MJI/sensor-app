@@ -286,13 +286,19 @@ function doClassify(f){
   var bgs=(BL.bg_b-BL.bg_a)-(f.bg_b-f.bg_a);
   var hd=bl_hue-cur_hue-bgs;
   var dropS=Math.max(0,(f.drop_a-BL.drop_a)+(BL.bg_a-f.bg_a));
-  var h2o_real=hd>6||dropS>=2.5;
+
+  var xt=Math.max(0,h2S-1.0)*0.7;
+  var hd_c=hd-xt;
+  var dropS_c=Math.max(0,dropS-xt);
+  var h2oS_c=Math.max(0,h2oS-xt*2.5);
+
+  var h2o_real=hd_c>6||dropS_c>=2.5;
 
   if(h2S<-10&&!h2o_real){
-    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10,rs:'-'};
+    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd_c*10)/10,dropS:Math.round(dropS_c*10)/10,bgs:Math.round(bgs*10)/10,rs:'-',xt:Math.round(xt*10)/10};
   }
 
-  var rs=hd+(dropS>=3?3:0)+(h2oS>=12?3:0);
+  var rs=hd_c+(dropS_c>=3?3:0)+(h2oS_c>=12?3:0);
   var h2o_sig=h2o_real&&rs>3.5;
 
   var state;
@@ -319,14 +325,14 @@ function doClassify(f){
   }
 
   var conf;
-  if(state==='initial'&&h2S<0.5&&hd<3&&hd>-3) conf='high';
+  if(state==='initial'&&h2S<0.5&&hd_c<3&&hd_c>-3) conf='high';
   else if(state==='H2_only'&&h2S>3.0) conf='high';
-  else if(state==='H2O_only'&&(hd>12||dropS>=5)) conf='high';
-  else if(state==='H2+RH'&&h2S>2.0&&(hd>12||dropS>=5)) conf='high';
+  else if(state==='H2O_only'&&(hd_c>12||dropS_c>=5)) conf='high';
+  else if(state==='H2+RH'&&h2S>2.0&&(hd_c>12||dropS_c>=5)) conf='high';
   else if(state!=='initial') conf='medium';
   else conf='low';
 
-  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10,rs:Math.round(rs*10)/10};
+  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd_c*10)/10,dropS:Math.round(dropS_c*10)/10,bgs:Math.round(bgs*10)/10,rs:Math.round(rs*10)/10,xt:Math.round(xt*10)/10};
 }
 
 // ===== UI =====
@@ -339,7 +345,7 @@ function showResult(r){
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
-  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hd='+r.hd+' drop='+r.dropS+' bgs='+r.bgs+' rs='+r.rs+')';
+  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hd='+r.hd+' drop='+r.dropS+' bgs='+r.bgs+' rs='+r.rs+(r.xt?' xt='+r.xt:'')+')';
   var h2E=document.getElementById('h2Val');
   if(r.state==='no_sample'||r.state==='no_sensor'){h2E.textContent='-';h2E.style.color='#999';}
   else if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
