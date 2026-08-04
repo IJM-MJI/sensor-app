@@ -269,25 +269,23 @@ function h2Score(f){
 }
 
 function h2oScore(f){
-  var B=BL_DEFAULT;
-  var d_bg_a=B.bg_a-f.bg_a;
-  var d_bg_b=B.bg_b-f.bg_b;
-  var pink=Math.max(0,(f.top_a-B.top_a)+d_bg_a)+Math.max(0,(f.flame_a-B.flame_a)+d_bg_a);
-  var blue=Math.max(0,(B.drop_b-f.drop_b)-d_bg_b);
+  var d_bg_a=BL.bg_a-f.bg_a;
+  var d_bg_b=BL.bg_b-f.bg_b;
+  var pink=Math.max(0,(f.top_a-BL.top_a)+d_bg_a)+Math.max(0,(f.flame_a-BL.flame_a)+d_bg_a);
+  var blue=Math.max(0,(BL.drop_b-f.drop_b)-d_bg_b);
   return pink*1.5+blue*1.0;
 }
 
 function doClassify(f){
   var h2S=h2Score(f);
   var h2oS=h2oScore(f);
-  var B=BL_DEFAULT;
 
   var H2_T=3.0;
   var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
-  var bl_hue=(B.top_b-B.top_a+B.drop_b-B.drop_a)/2;
-  var bgs=(B.bg_b-B.bg_a)-(f.bg_b-f.bg_a);
+  var bl_hue=(BL.top_b-BL.top_a+BL.drop_b-BL.drop_a)/2;
+  var bgs=(BL.bg_b-BL.bg_a)-(f.bg_b-f.bg_a);
   var hd=bl_hue-cur_hue-bgs;
-  var dropS=Math.max(0,(f.drop_a-B.drop_a)+(B.bg_a-f.bg_a));
+  var dropS=Math.max(0,(f.drop_a-BL.drop_a)+(BL.bg_a-f.bg_a));
   var h2o_real=hd>6||dropS>=2.5;
 
   if(h2S<-10&&!h2o_real){
