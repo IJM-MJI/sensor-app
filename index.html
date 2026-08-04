@@ -262,11 +262,11 @@ function doClassify(f){
 
   var h2=null,rh=null;
   if(state==='H2_only'||state==='H2+RH'){
-    var da=BL.top_a-f.top_a;
-    if(da<1.0) h2='<1%';
-    else if(da<2.0) h2='~1%';
-    else if(da<3.5) h2='~2%';
-    else if(da<5.0) h2='~3%';
+    var da=(BL.top_a-f.top_a)-(BL.bg_a-f.bg_a);
+    if(da<0.5) h2='<1%';
+    else if(da<1.5) h2='~1%';
+    else if(da<3.0) h2='~2%';
+    else if(da<4.5) h2='~3%';
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
@@ -275,7 +275,9 @@ function doClassify(f){
     else if(rs>11) rh='~70%';
     else if(rs>8) rh='~60%';
     else if(rs>5.5) rh='~50%';
-    else rh='~40%';
+    else if(rs>3.5) rh='~40%';
+    else if(rs>1.5) rh='~30%';
+    else rh='~20%';
   }
 
   var conf;
@@ -286,7 +288,8 @@ function doClassify(f){
   else if(state!=='initial') conf='medium';
   else conf='low';
 
-  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10};
+  var rsVal=(state==='H2O_only'||state==='H2+RH')?Math.round((hd+(dropS>=3?3:0)+(h2oS>=12?3:0))*10)/10:'-';
+  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10,rs:rsVal};
 }
 
 // ===== UI =====
@@ -299,7 +302,7 @@ function showResult(r){
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
-  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hd='+r.hd+' drop='+r.dropS+' bgs='+r.bgs+')';
+  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hd='+r.hd+' drop='+r.dropS+' bgs='+r.bgs+' rs='+r.rs+')';
   var h2E=document.getElementById('h2Val');
   if(r.state==='no_sample'||r.state==='no_sensor'){h2E.textContent='-';h2E.style.color='#999';}
   else if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
