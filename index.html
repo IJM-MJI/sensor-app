@@ -28,6 +28,7 @@ body{
 }
 .cam-wrap canvas{display:none}
 #capturedImg{display:none}
+#dbgCvs{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;display:none}
 .shutter-area{
   display:flex;justify-content:center;align-items:center;
   padding:16px;background:#111;gap:20px;
@@ -115,6 +116,7 @@ body{
     <video id="vid" autoplay playsinline muted></video>
     <img id="capturedImg">
     <canvas id="cvs"></canvas>
+    <canvas id="dbgCvs"></canvas>
     <div id="procOverlay" class="proc-overlay hidden">
       <div class="spin"></div>
       <span>Analyzing...</span>
@@ -359,6 +361,7 @@ function capture(){
         return;
       }
       showResult(r);
+      drawDebugOverlay(r);
       document.getElementById('dbg').textContent=r.dbg||'';
     }catch(e){
       document.getElementById('dbg').textContent='Error: '+e.message+' '+e.stack;
@@ -371,6 +374,7 @@ function capture(){
 function retake(){
   captured=false;
   document.getElementById('capturedImg').style.display='none';
+  document.getElementById('dbgCvs').style.display='none';
   vid.style.display='block';
   document.getElementById('shutterBtn').classList.remove('hidden');
   document.getElementById('retakeBtn').classList.add('hidden');
@@ -381,7 +385,6 @@ function retake(){
 // ===== IMAGE PROCESSING WITH OPENCV.JS =====
 function processFrame(){
   var src=cv.imread(cvs);
-  // Resize to max 480px for mobile performance
   var maxP=480;
   var sc=Math.max(src.rows,src.cols)>maxP?maxP/Math.max(src.rows,src.cols):1;
   var proc=new cv.Mat();
@@ -389,6 +392,7 @@ function processFrame(){
   else src.copyTo(proc);
   src.delete();
   var result=detectAndClassify(proc);
+  result._scale=sc;
   proc.delete();
   return result;
 }
@@ -432,6 +436,7 @@ function detectAndClassify(src){
     var avg=cnt>0?sum/cnt:0;
     if(avg>bBr){bBr=avg;bCx=cx;bCy=cy;bR=r;}
   }
+  var nCircles=circles.cols;
   circles.delete(); gray.delete();
 
   if(bBr<80)
@@ -462,7 +467,7 @@ function detectAndClassify(src){
       var L=labData[ii],a=labData[ii+1],b=labData[ii+2];
       var ao=a-128,bo=b-128;
       var c=Math.sqrt(ao*ao+bo*bo);
-      allPx.push({L:L,a:a,b:b,c:c});
+      allPx.push({L:L,a:a,b:b,c:c,x:xx,y:yy});
     }
   }
   lab.delete();
@@ -475,18 +480,21 @@ function detectAndClassify(src){
   allPx.sort(function(a,b){return a.c-b.c;});
   var n=allPx.length;
 
+  // Tag each pixel category for debug
+  for(var i=0;i<n;i++) allPx[i].cat='mid';
+
   // Top 3% chroma pixels -> top measurement
   var topIdx=Math.floor(n*0.97);
   var topPx=allPx.slice(topIdx);
   var topL=0,topA=0,topB=0;
-  for(var i=0;i<topPx.length;i++){topL+=topPx[i].L;topA+=topPx[i].a;topB+=topPx[i].b;}
+  for(var i=0;i<topPx.length;i++){topL+=topPx[i].L;topA+=topPx[i].a;topB+=topPx[i].b;topPx[i].cat='top';}
   topL/=topPx.length;topA/=topPx.length;topB/=topPx.length;
 
   // Bottom 50% chroma -> background measurement
   var bgIdx=Math.floor(n*0.5);
   var bgPx=allPx.slice(0,bgIdx);
   var bgL=0,bgA=0,bgB=0;
-  for(var i=0;i<bgPx.length;i++){bgL+=bgPx[i].L;bgA+=bgPx[i].a;bgB+=bgPx[i].b;}
+  for(var i=0;i<bgPx.length;i++){bgL+=bgPx[i].L;bgA+=bgPx[i].a;bgB+=bgPx[i].b;bgPx[i].cat='bg';}
   bgL/=bgPx.length;bgA/=bgPx.length;bgB/=bgPx.length;
 
   // Split high-chroma pixels (chroma>15) by b-channel median -> flame (high b) / drop (low b)
@@ -500,10 +508,10 @@ function detectAndClassify(src){
     var flamePx=hiC.slice(mid); // higher b = flame
     var dropPx=hiC.slice(0,mid); // lower b = drop
     flameL=0;flameA=0;flameB=0;
-    for(var i=0;i<flamePx.length;i++){flameL+=flamePx[i].L;flameA+=flamePx[i].a;flameB+=flamePx[i].b;}
+    for(var i=0;i<flamePx.length;i++){flameL+=flamePx[i].L;flameA+=flamePx[i].a;flameB+=flamePx[i].b;if(flamePx[i].cat!=='top')flamePx[i].cat='flame';}
     flameL/=flamePx.length;flameA/=flamePx.length;flameB/=flamePx.length;
     dropL=0;dropA=0;dropB=0;
-    for(var i=0;i<dropPx.length;i++){dropL+=dropPx[i].L;dropA+=dropPx[i].a;dropB+=dropPx[i].b;}
+    for(var i=0;i<dropPx.length;i++){dropL+=dropPx[i].L;dropA+=dropPx[i].a;dropB+=dropPx[i].b;if(dropPx[i].cat!=='top')dropPx[i].cat='drop';}
     dropL/=dropPx.length;dropA/=dropPx.length;dropB/=dropPx.length;
   }else{
     flameL=topL;flameA=topA;flameB=topB;
@@ -525,7 +533,55 @@ function detectAndClassify(src){
     ') fl=('+flameA.toFixed(1)+','+flameB.toFixed(0)+
     ') bg=('+bgA.toFixed(1)+','+bgB.toFixed(0)+
     ') H2='+clf.h2S+' H2O='+clf.h2oS+' hue='+clf.hue+(calibrated?' [CAL]':' [DEF]');
+  clf._dbgGeo={cx:bCx,cy:bCy,r:bR,innerR:innerR,w:w,h:h,
+    totalCircles:nCircles,brightness:Math.round(bBr),
+    nPx:n,nTop:topPx.length,nBg:bgPx.length,nHiC:hiC.length,
+    pixels:allPx};
   return clf;
+}
+
+// ===== DEBUG OVERLAY =====
+function drawDebugOverlay(r){
+  var g=r._dbgGeo;
+  if(!g) return;
+  var sc=r._scale||1;
+  var inv=1/sc;
+  var imgEl=document.getElementById('capturedImg');
+  var dc=document.getElementById('dbgCvs');
+  dc.width=cvs.width; dc.height=cvs.height;
+  dc.style.display='block';
+  var dx=dc.getContext('2d');
+  dx.clearRect(0,0,dc.width,dc.height);
+
+  // Draw detected circle (red) and inner circle (yellow)
+  dx.strokeStyle='rgba(255,0,0,0.8)';dx.lineWidth=3;
+  dx.beginPath();dx.arc(g.cx*inv,g.cy*inv,g.r*inv,0,Math.PI*2);dx.stroke();
+  dx.strokeStyle='rgba(255,255,0,0.7)';dx.lineWidth=2;
+  dx.beginPath();dx.arc(g.cx*inv,g.cy*inv,g.innerR*inv,0,Math.PI*2);dx.stroke();
+
+  // Draw pixel categories as colored dots (sample every Nth pixel for performance)
+  var px=g.pixels;
+  var step=Math.max(1,Math.floor(px.length/3000));
+  var colors={top:'rgba(255,0,0,0.7)',bg:'rgba(0,0,255,0.5)',flame:'rgba(255,165,0,0.6)',drop:'rgba(0,255,0,0.6)',mid:'rgba(255,255,255,0.15)'};
+  var dotR=Math.max(1,Math.round(2*inv));
+  for(var i=0;i<px.length;i+=step){
+    var p=px[i];
+    dx.fillStyle=colors[p.cat]||colors.mid;
+    dx.fillRect(p.x*inv-dotR/2,p.y*inv-dotR/2,dotR,dotR);
+  }
+
+  // Legend and stats
+  dx.font='bold 14px sans-serif';
+  dx.fillStyle='rgba(0,0,0,0.7)';
+  dx.fillRect(4,4,220,130);
+  dx.fillStyle='#fff';dx.fillText('HoughCircles: '+g.totalCircles+' found',10,20);
+  dx.fillText('Best: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness,10,36);
+  dx.fillText('innerR='+g.innerR+' (0.90x)',10,52);
+  dx.fillText('Pixels: '+g.nPx+' total',10,68);
+  dx.fillStyle='rgba(255,0,0,0.9)';dx.fillText('Top 3%: '+g.nTop,10,84);
+  dx.fillStyle='rgba(0,0,255,0.9)';dx.fillText('BG 50%: '+g.nBg,10,100);
+  dx.fillStyle='rgba(255,165,0,0.9)';dx.fillText('Flame: '+(g.nHiC>20?Math.floor(g.nHiC/2):0),10,116);
+  dx.fillStyle='rgba(0,255,0,0.9)';dx.fillText('Drop: '+(g.nHiC>20?Math.ceil(g.nHiC/2):0),10,132);
 }
 
 // ===== LOAD OPENCV =====
