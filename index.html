@@ -417,8 +417,8 @@ function detectAndClassify(src){
     return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'No circular window found'};
   }
 
-  // Among bright circles (avg>80), pick smallest radius (= inner glass window)
-  var bCx=0,bCy=0,bR=9999,bBr=-1;
+  // Best circle by brightness (sensor window is brightest circular area)
+  var bCx=0,bCy=0,bR=0,bBr=-1;
   for(var i=0;i<circles.cols;i++){
     var cx=Math.round(circles.data32F[i*3]);
     var cy=Math.round(circles.data32F[i*3+1]);
@@ -432,30 +432,9 @@ function detectAndClassify(src){
           sum+=gray.ucharAt(py,px);cnt++;
         }
       }
-    }
-    var avg=cnt>0?sum/cnt:0;
-    if(avg>80&&r<bR){bBr=avg;bCx=cx;bCy=cy;bR=r;}
-  }
-  if(bBr<0){
-    // fallback: pick brightest if none passed threshold
-    bR=0;
-    for(var i=0;i<circles.cols;i++){
-      var cx=Math.round(circles.data32F[i*3]);
-      var cy=Math.round(circles.data32F[i*3+1]);
-      var r=Math.round(circles.data32F[i*3+2]);
-      var ir=Math.round(r*0.5);
-      var sum=0,cnt=0;
-      for(var dy=-ir;dy<=ir;dy+=3){
-        for(var dx=-ir;dx<=ir;dx+=3){
-          var px=cx+dx,py=cy+dy;
-          if(px>=0&&px<w&&py>=0&&py<h&&dx*dx+dy*dy<=ir*ir){
-            sum+=gray.ucharAt(py,px);cnt++;
-          }
-        }
       }
-      var avg=cnt>0?sum/cnt:0;
-      if(avg>bBr){bBr=avg;bCx=cx;bCy=cy;bR=r;}
-    }
+    var avg=cnt>0?sum/cnt:0;
+    if(avg>bBr){bBr=avg;bCx=cx;bCy=cy;bR=r;}
   }
   var nCircles=circles.cols;
   circles.delete(); gray.delete();
