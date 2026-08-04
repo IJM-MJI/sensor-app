@@ -358,22 +358,15 @@ function showResult(r){
 var manualROI=null; // {cx:0-1, cy:0-1, rPct:30} percentage-based
 var roiMode=false;
 
-function loadROI(){
-  var s=localStorage.getItem('sensor_roi');
-  if(s){
-    try{ manualROI=JSON.parse(s); updateROIUI(); }catch(e){}
-  }
-}
+function loadROI(){}
 
 function saveROI(){
-  localStorage.setItem('sensor_roi',JSON.stringify(manualROI));
   updateROIUI();
 }
 
 function clearROI(){
   manualROI=null;
   roiMode=false;
-  localStorage.removeItem('sensor_roi');
   updateROIUI();
   document.getElementById('roiGuide').style.display='none';
   document.getElementById('roiOverlay').style.display='none';
@@ -432,9 +425,6 @@ document.getElementById('roiGuide').addEventListener('click',function(e){
   var rVal=parseInt(document.getElementById('roiSlider').value);
   manualROI={cx:x,cy:y,rPct:rVal};
   saveROI();
-  roiMode=false;
-  document.getElementById('roiGuide').style.display='none';
-  document.getElementById('roiSliderWrap').classList.add('hidden');
   drawROIOverlay();
 });
 
