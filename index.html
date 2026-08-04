@@ -251,12 +251,15 @@ function doClassify(f){
   var h2o_real=hd>6||dropS>=2.5;
 
   if(h2S<-10&&!h2o_real){
-    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10};
+    return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10,rs:'-'};
   }
 
+  var rs=hd+(dropS>=3?3:0)+(h2oS>=12?3:0);
+  var h2o_sig=h2o_real&&rs>3.5;
+
   var state;
-  if(h2S>=H2_T&&h2o_real) state='H2+RH';
-  else if(h2o_real) state='H2O_only';
+  if(h2S>=H2_T&&h2o_sig) state='H2+RH';
+  else if(h2o_sig) state='H2O_only';
   else if(h2S>=H2_T) state='H2_only';
   else state='initial';
 
@@ -270,14 +273,11 @@ function doClassify(f){
     else h2='~4%';
   }
   if(state==='H2O_only'||state==='H2+RH'){
-    var rs=hd+(dropS>=3?3:0)+(h2oS>=12?3:0);
     if(rs>15) rh='≥80%';
     else if(rs>11) rh='~70%';
     else if(rs>8) rh='~60%';
     else if(rs>5.5) rh='~50%';
-    else if(rs>3.5) rh='~40%';
-    else if(rs>1.5) rh='~30%';
-    else rh='~20%';
+    else rh='~40%';
   }
 
   var conf;
@@ -288,8 +288,7 @@ function doClassify(f){
   else if(state!=='initial') conf='medium';
   else conf='low';
 
-  var rsVal=(state==='H2O_only'||state==='H2+RH')?Math.round((hd+(dropS>=3?3:0)+(h2oS>=12?3:0))*10)/10:'-';
-  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10,rs:rsVal};
+  return{state:state,conf:conf,h2:h2,rh:rh,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd*10)/10,dropS:Math.round(dropS*10)/10,bgs:Math.round(bgs*10)/10,rs:Math.round(rs*10)/10};
 }
 
 // ===== UI =====
