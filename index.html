@@ -253,7 +253,7 @@ function h2Score(f){
   var d_drop_a=(BL.drop_a-f.drop_a)-d_bg_a;
   var flame_only=Math.max(0,d_flame_a-d_drop_a);
   var shift_b_delta=(f.flame_b-f.bg_b)-(BL.flame_b-BL.bg_b);
-  var h2o_penalty=Math.max(0,shift_b_delta)*0.3;
+  var h2o_penalty=Math.max(0,shift_b_delta)*0.1;
   return d_top_a*2.0+d_flame_a*1.0+flame_only*0.5-h2o_penalty;
 }
 
@@ -276,7 +276,7 @@ function doClassify(f){
   var hd=bl_hue-cur_hue-bgs;
   var dropS=Math.max(0,(f.drop_a-BL.drop_a)+(BL.bg_a-f.bg_a));
 
-  var xt=Math.max(0,h2S-1.0)*0.7;
+  var xt=Math.max(0,h2S-1.0)*0.4;
   var hd_c=hd-xt;
   var dropS_c=Math.max(0,dropS-xt);
   var h2oS_c=Math.max(0,h2oS-xt*2.5);
