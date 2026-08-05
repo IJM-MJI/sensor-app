@@ -281,13 +281,13 @@ function doClassify(f){
   var dropS_c=Math.max(0,dropS-xt);
   var h2oS_c=Math.max(0,h2oS-xt*2.5);
 
-  var h2o_real=hd_c>6||dropS_c>=2.5;
+  var h2o_real=hd_c>6||dropS_c>=5.5;
 
   if(h2S<-10&&!h2o_real){
     return{state:'no_sample',conf:'-',h2:null,rh:null,h2S:Math.round(h2S*10)/10,h2oS:Math.round(h2oS*10)/10,hd:Math.round(hd_c*10)/10,dropS:Math.round(dropS_c*10)/10,bgs:Math.round(bgs*10)/10,rs:'-',xt:Math.round(xt*10)/10};
   }
 
-  var rs=hd_c+(dropS_c>=3?3:0)+(h2oS_c>=12?3:0);
+  var rs=hd_c+(dropS_c>=5.5?3:0)+(h2oS_c>=12?3:0);
   var h2o_sig=h2o_real&&rs>3.5;
 
   var state;
