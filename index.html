@@ -208,29 +208,17 @@ var BL=JSON.parse(JSON.stringify(BL_DEFAULT));
 var calibrated=false;
 var calMode=false;
 
-function loadCal(){
-  var s=localStorage.getItem('sensor_cal_v5');
-  if(s){
-    try{
-      var d=JSON.parse(s);
-      for(var k in BL_DEFAULT) if(d[k]!=null) BL[k]=d[k];
-      calibrated=true;
-      updateCalUI();
-    }catch(e){}
-  }
-}
+function loadCal(){}
 
 function saveCal(feat){
   for(var k in BL_DEFAULT) if(feat[k]!=null) BL[k]=feat[k];
   calibrated=true;
-  localStorage.setItem('sensor_cal_v5',JSON.stringify(BL));
   updateCalUI();
 }
 
 function clearCal(){
   BL=JSON.parse(JSON.stringify(BL_DEFAULT));
   calibrated=false;
-  localStorage.removeItem('sensor_cal_v5');
   updateCalUI();
 }
 
