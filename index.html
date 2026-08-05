@@ -509,9 +509,15 @@ function finishCapture(){
       if(calMode&&r.state!=='no_sensor'){
         var f=r._raw;
         saveCal(f);
+        var g=r._dbgGeo;
+        if(g&&g.cx&&g.cy&&g.r){
+          manualROI={cx:g.cx/g.w,cy:g.cy/g.h,rPct:Math.round(g.r/Math.min(g.h,g.w)*100)};
+          updateROIUI();
+          drawROIOverlay();
+        }
         calMode=false;
         document.getElementById('calBtn').style.background='#2196F3';
-        document.getElementById('dbg').textContent='Calibrated! top_a='+f.top_a.toFixed(1)+' flame_a='+f.flame_a.toFixed(1)+' flame_b='+f.flame_b.toFixed(1);
+        document.getElementById('dbg').textContent='Calibrated! ROI locked. top_a='+f.top_a.toFixed(1)+' flame_a='+f.flame_a.toFixed(1)+' flame_b='+f.flame_b.toFixed(1);
         document.getElementById('procOverlay').classList.add('hidden');
         retake();
         return;
