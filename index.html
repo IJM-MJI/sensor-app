@@ -482,17 +482,27 @@ function capture(){
   if(captured||!camReady) return;
   var vw=vid.videoWidth, vh=vid.videoHeight;
   if(!vw||!vh) return;
+  captured=true;
+  document.getElementById('shutterBtn').classList.add('hidden');
+  document.getElementById('procOverlay').classList.remove('hidden');
   cvs.width=vw; cvs.height=vh;
-  ctx2d.drawImage(vid,0,0);
+  var fi=0, nF=5;
+  function grabNext(){
+    ctx2d.globalAlpha=1.0/(fi+1);
+    ctx2d.drawImage(vid,0,0);
+    fi++;
+    if(fi<nF){ setTimeout(grabNext,80); }
+    else{ ctx2d.globalAlpha=1.0; finishCapture(); }
+  }
+  grabNext();
+}
+function finishCapture(){
   var url=cvs.toDataURL('image/jpeg',0.92);
   document.getElementById('capturedImg').src=url;
   document.getElementById('capturedImg').style.display='block';
   document.getElementById('roiOverlay').style.display='none';
   vid.style.display='none';
-  captured=true;
-  document.getElementById('shutterBtn').classList.add('hidden');
   document.getElementById('retakeBtn').classList.remove('hidden');
-  document.getElementById('procOverlay').classList.remove('hidden');
   setTimeout(function(){
     try{
       var r=processFrame();
