@@ -486,12 +486,12 @@ function capture(){
   document.getElementById('shutterBtn').classList.add('hidden');
   document.getElementById('procOverlay').classList.remove('hidden');
   cvs.width=vw; cvs.height=vh;
-  var fi=0, nF=5;
+  var fi=0, nF=3;
   function grabNext(){
     ctx2d.globalAlpha=1.0/(fi+1);
     ctx2d.drawImage(vid,0,0);
     fi++;
-    if(fi<nF){ setTimeout(grabNext,80); }
+    if(fi<nF){ setTimeout(grabNext,50); }
     else{ ctx2d.globalAlpha=1.0; finishCapture(); }
   }
   grabNext();
@@ -725,17 +725,6 @@ function drawDebugOverlay(r){
   dx.beginPath();dx.arc(g.cx*inv,g.cy*inv,g.r*inv,0,Math.PI*2);dx.stroke();
   dx.strokeStyle='rgba(255,255,0,0.7)';dx.lineWidth=2;
   dx.beginPath();dx.arc(g.cx*inv,g.cy*inv,g.innerR*inv,0,Math.PI*2);dx.stroke();
-
-  // Draw pixel categories as colored dots (sample every Nth pixel for performance)
-  var px=g.pixels;
-  var step=Math.max(1,Math.floor(px.length/3000));
-  var colors={top:'rgba(255,0,0,0.7)',bg:'rgba(0,0,255,0.5)',flame:'rgba(255,165,0,0.6)',drop:'rgba(0,255,0,0.6)',mid:'rgba(255,255,255,0.15)'};
-  var dotR=Math.max(1,Math.round(2*inv));
-  for(var i=0;i<px.length;i+=step){
-    var p=px[i];
-    dx.fillStyle=colors[p.cat]||colors.mid;
-    dx.fillRect(p.x*inv-dotR/2,p.y*inv-dotR/2,dotR,dotR);
-  }
 
   // Legend and stats
   dx.font='bold 14px sans-serif';
