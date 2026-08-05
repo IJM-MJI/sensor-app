@@ -191,6 +191,7 @@ body{
         <span class="status-txt" id="stTxt">-</span>
       </div>
     </div>
+    <button id="copyBtn" onclick="copyResult()" style="width:100%;padding:10px;margin-top:4px;border:none;border-radius:8px;background:#333;color:#fff;font-size:14px;cursor:pointer">Copy Result</button>
   </div>
   <div class="dbg" id="dbg"></div>
 </div>
@@ -329,12 +330,15 @@ var SC={no_sensor:'#999',no_sample:'#ff9800',initial:'#66bb6a',H2_only:'#ef5350'
 var SN={no_sensor:'No Sensor Detected',no_sample:'No Sample Detected',initial:'Initial State',H2_only:'H₂ Detection',H2O_only:'Humidity Detection','H2+RH':'Simultaneous Detection'};
 var SM={no_sensor:['Sensor not found','#999'],no_sample:['Sample not visible — check lighting','#ff9800'],initial:['Status: Standby','#66bb6a'],H2_only:['Warning: H₂ Detected','#ef5350'],H2O_only:['High Humidity Detected','#42a5f5'],'H2+RH':['H₂ + Humidity Detected','#ab47bc']};
 
+var lastResultText='';
 function showResult(r){
   document.getElementById('resArea').classList.remove('hidden');
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
-  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' (H2='+r.h2S+' H2O='+r.h2oS+' hd='+r.hd+' drop='+r.dropS+' bgs='+r.bgs+' rs='+r.rs+(r.xt?' xt='+r.xt:'')+')';
+  var vals='H2='+r.h2S+' H2O='+r.h2oS+' hd='+r.hd+' drop='+r.dropS+' bgs='+r.bgs+' rs='+r.rs+(r.xt?' xt='+r.xt:'');
+  lastResultText=(SN[r.state]||r.state)+' | '+vals+(r.h2?' | '+r.h2:'')+(r.rh?' | '+r.rh:'');
+  document.getElementById('sConf').textContent=(cm[r.conf]||'')+' ('+vals+')';
   var h2E=document.getElementById('h2Val');
   if(r.state==='no_sample'||r.state==='no_sensor'){h2E.textContent='-';h2E.style.color='#999';}
   else if(r.h2){h2E.textContent=r.h2+' (Below LEL)';h2E.style.color='#ef5350';}
@@ -347,6 +351,14 @@ function showResult(r){
   document.getElementById('stDot').style.background=msg[1];
   document.getElementById('stTxt').textContent=msg[0];
   document.getElementById('stTxt').style.color=msg[1];
+}
+function copyResult(){
+  if(lastResultText){
+    navigator.clipboard.writeText(lastResultText).then(function(){
+      var b=document.getElementById('copyBtn');
+      b.textContent='Copied!';setTimeout(function(){b.textContent='Copy Result';},1500);
+    }).catch(function(){});
+  }
 }
 
 // ===== MANUAL ROI =====
@@ -480,6 +492,10 @@ window.addEventListener('focus',function(){resumeCam();});
 
 function capture(){
   if(captured||!camReady) return;
+  if(!calibrated&&!calMode){
+    document.getElementById('dbg').textContent='⚠ Calibrate first: photograph sensor in initial state';
+    return;
+  }
   var vw=vid.videoWidth, vh=vid.videoHeight;
   if(!vw||!vh) return;
   captured=true;
