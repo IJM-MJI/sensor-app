@@ -269,7 +269,7 @@ function doClassify(f){
   var h2S=h2Score(f);
   var h2oS=h2oScore(f);
 
-  var H2_T=3.0;
+  var H2_T=5.0;
   var cur_hue=(f.top_b-f.top_a+f.drop_b-f.drop_a)/2;
   var bl_hue=(BL.top_b-BL.top_a+BL.drop_b-BL.drop_a)/2;
   var bgs=(BL.bg_b-BL.bg_a)-(f.bg_b-f.bg_a);
