@@ -252,10 +252,7 @@ function updateCalUI(){
 }
 
 function startCal(){
-  calMode=true;
-  document.getElementById('calBtn').textContent='Take photo of initial state';
-  document.getElementById('calBtn').style.background='#e65100';
-  document.getElementById('dbg').textContent='Calibration: photograph sensor in initial (no gas) state';
+  clearCal();
 }
 
 function h2Score(f){
@@ -576,10 +573,14 @@ function retake(){
   document.getElementById('capturedImg').style.display='none';
   document.getElementById('dbgCvs').style.display='none';
   vid.style.display='block';
-  document.getElementById('shutterBtn').classList.remove('hidden');
   document.getElementById('retakeBtn').classList.add('hidden');
   document.getElementById('resArea').classList.add('hidden');
   document.getElementById('dbg').textContent='';
+  if(calibrated){
+    document.getElementById('shutterBtn').classList.remove('hidden');
+    document.getElementById('shutterBtn').style.opacity='1';
+    document.getElementById('shutterBtn').style.pointerEvents='auto';
+  }
   if(manualROI) drawROIOverlay();
   resumeCam();
 }
