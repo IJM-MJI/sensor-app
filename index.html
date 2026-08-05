@@ -465,11 +465,18 @@ function initCam(){
     document.getElementById('dbg').textContent='Camera: '+e.message;
   });
 }
-document.addEventListener('visibilitychange',function(){
-  if(!document.hidden&&!captured){
+function resumeCam(){
+  if(captured) return;
+  var alive=vid.srcObject&&vid.srcObject.getTracks().some(function(t){return t.readyState==='live';});
+  if(!alive){
     initCam();
+  }else{
+    vid.play().catch(function(){});
   }
-});
+}
+document.addEventListener('visibilitychange',function(){if(!document.hidden) resumeCam();});
+window.addEventListener('pageshow',function(){resumeCam();});
+window.addEventListener('focus',function(){resumeCam();});
 
 function capture(){
   if(captured||!camReady) return;
@@ -520,6 +527,7 @@ function retake(){
   document.getElementById('resArea').classList.add('hidden');
   document.getElementById('dbg').textContent='';
   if(manualROI) drawROIOverlay();
+  resumeCam();
 }
 
 // ===== IMAGE PROCESSING WITH OPENCV.JS =====
