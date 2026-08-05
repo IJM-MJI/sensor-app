@@ -494,6 +494,7 @@ function capture(){
         calMode=false;
         document.getElementById('calBtn').style.background='#2196F3';
         document.getElementById('dbg').textContent='Calibrated! top_a='+f.top_a.toFixed(1)+' flame_a='+f.flame_a.toFixed(1)+' flame_b='+f.flame_b.toFixed(1);
+        document.getElementById('procOverlay').classList.add('hidden');
         retake();
         return;
       }
