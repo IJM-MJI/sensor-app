@@ -447,16 +447,29 @@ function enableShutter(){
   if(sm) sm.style.display='none';
 }
 function initCam(){
+  if(vid.srcObject){
+    vid.srcObject.getTracks().forEach(function(t){t.stop();});
+    vid.srcObject=null;
+  }
   navigator.mediaDevices.getUserMedia({
     video:{facingMode:'environment',width:{ideal:1280},height:{ideal:960}}
   }).then(function(stream){
     vid.srcObject=stream; vid.play();
     camReady=false;
+    var sb=document.getElementById('shutterBtn');
+    sb.style.opacity='0.3';sb.style.pointerEvents='none';
+    var sm=document.getElementById('stabilizeMsg');
+    if(sm) sm.style.display='';
     setTimeout(enableShutter,3000);
   }).catch(function(e){
     document.getElementById('dbg').textContent='Camera: '+e.message;
   });
 }
+document.addEventListener('visibilitychange',function(){
+  if(!document.hidden&&!captured){
+    initCam();
+  }
+});
 
 function capture(){
   if(captured||!camReady) return;
