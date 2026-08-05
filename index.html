@@ -161,7 +161,8 @@ body{
 
   <div class="shutter-area">
     <button class="retake hidden" id="retakeBtn" onclick="retake()">Retake</button>
-    <button class="shutter" id="shutterBtn" onclick="capture()"></button>
+    <button class="shutter" id="shutterBtn" onclick="capture()" style="opacity:0.3;pointer-events:none"></button>
+    <div id="stabilizeMsg" style="color:#fff;font-size:13px;position:absolute;bottom:4px;width:100%;text-align:center;pointer-events:none">Camera stabilizing...</div>
   </div>
 
   <div id="resArea" class="hidden">
@@ -449,18 +450,28 @@ var cvs=document.getElementById('cvs');
 var ctx2d=cvs.getContext('2d');
 var captured=false;
 
+var camReady=false;
+function enableShutter(){
+  camReady=true;
+  var sb=document.getElementById('shutterBtn');
+  sb.style.opacity='1';sb.style.pointerEvents='auto';
+  var sm=document.getElementById('stabilizeMsg');
+  if(sm) sm.style.display='none';
+}
 function initCam(){
   navigator.mediaDevices.getUserMedia({
     video:{facingMode:'environment',width:{ideal:1280},height:{ideal:960}}
   }).then(function(stream){
     vid.srcObject=stream; vid.play();
+    camReady=false;
+    setTimeout(enableShutter,3000);
   }).catch(function(e){
     document.getElementById('dbg').textContent='Camera: '+e.message;
   });
 }
 
 function capture(){
-  if(captured) return;
+  if(captured||!camReady) return;
   var vw=vid.videoWidth, vh=vid.videoHeight;
   if(!vw||!vh) return;
   cvs.width=vw; cvs.height=vh;
