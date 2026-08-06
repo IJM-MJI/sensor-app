@@ -226,14 +226,35 @@ function clearCal(){
   calibrated=false;
   manualROI=null;
   updateCalUI();
+
+  // Leave the captured-photo state as well. Without this, pressing Reset or
+  // Re-calibrate while a shot is on screen re-shows the calibration overlay on top of
+  // the still, `captured` stays true so the shutter early-returns, and the overlay
+  // covers the Retake button — the app looks frozen and only a page reload clears it.
+  captured=false;
+  document.getElementById('capturedImg').style.display='none';
+  document.getElementById('dbgCvs').style.display='none';
+  document.getElementById('retakeBtn').classList.add('hidden');
+  document.getElementById('resArea').classList.add('hidden');
+  document.getElementById('dbg').textContent='';
+  if(typeof vid!=='undefined'&&vid) vid.style.display='block';
+
   var co=document.getElementById('calOverlay');if(co) co.style.display='';
   document.getElementById('calBar').style.display='none';
   var sb=document.getElementById('shutterBtn');
   sb.classList.add('hidden');
   sb.style.opacity='0.3';sb.style.pointerEvents='none';
   var cs=document.getElementById('calShutterBtn');
-  if(cs){cs.classList.remove('hidden');cs.style.opacity='0.3';cs.style.pointerEvents='none';}
+  if(cs){
+    cs.classList.remove('hidden');
+    // If the camera is already warmed up, the calibration shutter must be usable
+    // straight away — otherwise it stays greyed out until the next stabilise cycle.
+    var live=(typeof camReady!=='undefined')&&camReady;
+    cs.style.opacity=live?'1':'0.3';
+    cs.style.pointerEvents=live?'auto':'none';
+  }
   clearROI();
+  if(typeof resumeCam==='function') resumeCam();
 }
 
 function updateCalUI(){
