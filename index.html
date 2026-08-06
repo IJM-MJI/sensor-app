@@ -608,7 +608,7 @@ function processFrame(){
 
 function detectAndClassify(src){
   var h=src.rows, w=src.cols;
-  var bCx,bCy,bR,nCircles=0,bBr=255,roiSource='auto';
+  var bCx,bCy,bR,nCircles=0,bBr=255,roiSource='auto',bScore=-1;
 
   if(manualROI){
     // Manual ROI: fixed position
@@ -635,26 +635,43 @@ function detectAndClassify(src){
       return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'No circular window found'};
     }
 
+    // Pick the candidate holding the most COLOURED area, not the brightest one.
+    // Brightness picks the wrong circle: against a grey bench, the empty desk beside
+    // the chamber outscores the chamber window, so readings came off bare desk and
+    // never moved with humidity. Verified on 1_90_6.MOV (a clean RH 20->90 rise),
+    // where the brightness rule gave a total colour move of 2.7 while the chroma rule
+    // gave 6.0, matching the 6.9 measured by the offline research pipeline.
+    var selBgr=new cv.Mat();
+    cv.cvtColor(src,selBgr,cv.COLOR_RGBA2BGR);
+    var selLab=new cv.Mat();
+    cv.cvtColor(selBgr,selLab,cv.COLOR_BGR2Lab);
+    selBgr.delete();
+    var selData=selLab.data, selCols=selLab.cols;
+
     bCx=0;bCy=0;bR=0;bBr=-1;
     for(var i=0;i<circles.cols;i++){
       var cx=Math.round(circles.data32F[i*3]);
       var cy=Math.round(circles.data32F[i*3+1]);
       var r=Math.round(circles.data32F[i*3+2]);
       var ir=Math.round(r*0.5);
-      var sum=0,cnt=0;
+      var sum=0,cnt=0,chromaCnt=0;
       for(var dy=-ir;dy<=ir;dy+=3){
         for(var dx=-ir;dx<=ir;dx+=3){
           var px=cx+dx,py=cy+dy;
           if(px>=0&&px<w&&py>=0&&py<h&&dx*dx+dy*dy<=ir*ir){
             sum+=gray.ucharAt(py,px);cnt++;
+            var si=(py*selCols+px)*3;
+            var sa=selData[si+1]-128, sb=selData[si+2]-128;
+            if(Math.sqrt(sa*sa+sb*sb)>15) chromaCnt++;
           }
         }
       }
       var avg=cnt>0?sum/cnt:0;
-      if(avg>bBr){bBr=avg;bCx=cx;bCy=cy;bR=r;}
+      var score=cnt>0?chromaCnt/cnt:0;
+      if(score>bScore){bScore=score;bBr=avg;bCx=cx;bCy=cy;bR=r;}
     }
     nCircles=circles.cols;
-    circles.delete(); gray.delete();
+    circles.delete(); gray.delete(); selLab.delete();
 
     if(bBr<80)
       return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'Circle too dark'};
@@ -753,6 +770,7 @@ function detectAndClassify(src){
     ') H2='+clf.h2S+' H2O='+clf.h2oS+' hue='+clf.hue+(calibrated?' [CAL]':' [DEF]')+' ['+roiSource+']';
   clf._dbgGeo={cx:bCx,cy:bCy,r:bR,innerR:innerR,w:w,h:h,
     totalCircles:nCircles,brightness:Math.round(bBr),roiSource:roiSource,
+    chromaScore:bScore<0?null:Math.round(bScore*100),
     nPx:n,nTop:topPx.length,nBg:bgPx.length,nHiC:hiC.length,
     pixels:allPx};
   return clf;
@@ -783,7 +801,8 @@ function drawDebugOverlay(r){
   dx.fillRect(4,4,220,130);
   var src=g.roiSource==='manual'?'Manual ROI':'HoughCircles: '+g.totalCircles+' found';
   dx.fillStyle='#fff';dx.fillText(src,10,20);
-  dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness,10,36);
+  dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness
+    +(g.chromaScore===null?'':' chroma='+g.chromaScore+'%'),10,36);
   dx.fillText('innerR='+g.innerR+' (0.90x)',10,52);
   dx.fillText('Pixels: '+g.nPx+' total',10,68);
   dx.fillStyle='rgba(255,0,0,0.9)';dx.fillText('Top 3%: '+g.nTop,10,84);
