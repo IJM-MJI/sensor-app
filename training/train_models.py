@@ -862,6 +862,14 @@ def export_forest(model: ExtraTreesClassifier, name: str, features: list[str]) -
 
 def evaluate_regression(rows: list[dict[str, object]], label: str, features: list[str]) -> tuple[dict[str, object], dict[str, float]] | None:
     use = [r for r in rows if r[label] is not None and (label != "rh_value" or r["kind"] == "rh_only")]
+    if label == "h2_value":
+        # Recovery follows a different hysteretic path and is not a requested
+        # measurement output. Keep only exposure/reaction rows for quantitation.
+        recovery_start = {"1_90_H2_only_4.mp4": 122.0, "1_90_H2_only_5.mp4": 130.0}
+        use = [r for r in use if not (
+            str(r["video"]) in recovery_start
+            and float(r["time"]) >= recovery_start[str(r["video"])]
+        )]
     # H2 timelines are continuous ramp endpoints, so all 0--4% values are now
     # valid quantitative targets. RH retains its independently validated range.
     lower = 0.0 if label == "h2_value" else 70.0

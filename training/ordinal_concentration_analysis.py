@@ -436,7 +436,11 @@ def main():
         task_rows = [row for row in rows if row["kind"] == config["kind"]
                      and row.get(config["label"]) is not None]
         if task == "H2":
-            task_rows = [row for row in task_rows if "analysis_stage" in row]
+            # The application reports exposure response, not a concentration
+            # while purging. Recovery has a different hysteretic colour path and
+            # only two independent runs, so it must not supervise H2 quantitation.
+            task_rows = [row for row in task_rows
+                         if "analysis_stage" in row and row.get("analysis_phase") == "reaction"]
         paths[task] = colour_path(task_rows, config)
         models, predictions, within_run_models, within_run_predictions = {}, {}, {}, {}
         for name, estimator in candidates().items():
