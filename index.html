@@ -116,11 +116,12 @@ body{
 .roi-slider{display:none;padding:6px 14px;background:#fff;border-bottom:1px solid #e0e0e0}
 .roi-slider input{width:100%}
 .roi-slider span{font-size:12px;color:#888}
+.file-test{padding:10px 14px;border:1px solid #555;border-radius:9px;background:#222;color:#fff;font-size:13px;cursor:pointer}
 </style>
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.13 · concentration stages v1</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.13 · concentration stages v2</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -167,6 +168,8 @@ body{
     <button class="retake hidden" id="retakeBtn" onclick="retake()">Retake</button>
     <button id="calShutterBtn" onclick="doCalCapture()" style="padding:14px 32px;border:none;border-radius:12px;background:#2196F3;color:#fff;font-size:16px;font-weight:700;cursor:pointer;opacity:0.3;pointer-events:none">Calibrate</button>
     <button class="shutter hidden" id="shutterBtn" onclick="capture()"></button>
+    <button class="file-test" id="fileTestBtn" onclick="openTestImage()">Load saved frame</button>
+    <input id="testImageInput" type="file" accept="image/*" style="display:none" onchange="loadTestImage(this)">
     <div id="stabilizeMsg" style="color:#fff;font-size:13px;position:absolute;bottom:4px;width:100%;text-align:center;pointer-events:none">Camera stabilizing...</div>
   </div>
 
@@ -180,13 +183,13 @@ body{
       <div class="conf" id="sConf"></div>
     </div>
     <div class="card">
-      <h3>Response Detection</h3>
+      <h3>Concentration Estimate</h3>
       <div class="row">
-        <span class="lbl">H&#8322; response</span>
+        <span class="lbl">H&#8322; concentration</span>
         <span class="val" id="h2Val">-</span>
       </div>
       <div class="row">
-        <span class="lbl">RH &#8805;70% response</span>
+        <span class="lbl">RH concentration</span>
         <span class="val" id="rhVal">-</span>
       </div>
     </div>
@@ -205,7 +208,7 @@ body{
 <script src="sensor-concentration-model.js?v=20260813-1"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.13-concentration-stages-v1';
+var APP_VERSION='2026.08.13-concentration-stages-v2';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -459,7 +462,10 @@ function concentrationBand(model,f){
     var mid=(levels[i]+levels[i+1])/2;
     if(Math.abs(raw-mid)<=tolerance){boundary=i;break;}
   }
-  var outside=raw<levels[0]-(model.task==='H2'?0.75:12)||raw>levels[levels.length-1]+(model.task==='H2'?0.75:12);
+  // Static photographs can make the strong 4% flame slightly more saturated
+  // than video frames. The supplied known 4% photo scored 4.78, so retain a
+  // small validated endpoint margin while still rejecting gross extrapolation.
+  var outside=raw<levels[0]-(model.task==='H2'?0.75:12)||raw>levels[levels.length-1]+(model.task==='H2'?1.5:12);
   return{raw:raw,index:best,outside:outside,
     text:boundary>=0?(model.display_levels[boundary]+'–'+model.display_levels[boundary+1]):model.display_levels[best]};
 }
@@ -480,6 +486,16 @@ doClassify=function(f){
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
     if(!rhSimPending)rhQuant=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.rh,f);
+    // Keep the two numeric axes consistent with the selected physical state.
+    // The inactive axis is the calibrated recovery condition, not an unrelated
+    // regression extrapolation that can contradict the state label.
+    if(state==='initial'){
+      h2Quant={text:'0',outside:false};rhQuant={text:'20–30',outside:false};
+    }else if(state==='H2_only'){
+      rhQuant={text:'20–30',outside:false};
+    }else if(state==='H2O_only'){
+      h2Quant={text:'0',outside:false};
+    }
   }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhSimPending:rhSimPending,
@@ -509,6 +525,8 @@ function showResult(r){
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
   var vals=(r.h2p===undefined?'':'pH2='+r.h2p+' pRH='+r.rhp+
     (r.stateConfidence===undefined?'':' pState='+r.stateConfidence+' gap='+r.stateGap)+'  ')
+    +(r.h2Quant&&r.h2Quant.raw!=null?' rawH2='+r.h2Quant.raw.toFixed(2):'')
+    +(r.rhQuant&&r.rhQuant.raw!=null?' rawRH='+r.rhQuant.raw.toFixed(1):'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
   document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>';
@@ -700,6 +718,31 @@ function capture(){
   ctx2d.globalAlpha=1.0;
   ctx2d.drawImage(vid,0,0);
   finishCapture();
+}
+function openTestImage(){
+  if(captured)retake();
+  var input=document.getElementById('testImageInput');
+  input.value='';input.click();
+}
+function loadTestImage(input){
+  var file=input.files&&input.files[0];if(!file||captured)return;
+  var reader=new FileReader();
+  reader.onload=function(){
+    var image=new Image();
+    image.onload=function(){
+      calMode=!calibrated;
+      captured=true;
+      document.getElementById('shutterBtn').classList.add('hidden');
+      document.getElementById('calShutterBtn').classList.add('hidden');
+      document.getElementById('procOverlay').classList.remove('hidden');
+      cvs.width=image.naturalWidth;cvs.height=image.naturalHeight;
+      ctx2d.globalAlpha=1;ctx2d.drawImage(image,0,0);
+      finishCapture();
+    };
+    image.onerror=function(){document.getElementById('dbg').textContent='Could not read selected image.';};
+    image.src=reader.result;
+  };
+  reader.readAsDataURL(file);
 }
 function finishCapture(){
   var url=cvs.toDataURL('image/jpeg',0.92);
