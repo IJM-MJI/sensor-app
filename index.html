@@ -19,6 +19,7 @@ body{
   border-bottom:1px solid #e0e0e0;
   position:sticky;top:0;z-index:10;
 }
+.app-version{display:block;margin-top:2px;font-size:10px;font-weight:500;color:#888}
 .cam-wrap{
   position:relative;width:100%;
   aspect-ratio:1;background:#000;overflow:hidden;
@@ -119,7 +120,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data</div>
+<div class="header">Sensor Data<span class="app-version">2026.08.13 · H2/RH model v1</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -155,10 +156,10 @@ body{
     <div id="roiGuide"></div>
     <div id="procOverlay" class="proc-overlay hidden">
       <div class="spin"></div>
-      <span>Analyzing...</span>
+      <span id="procText">Accumulating 5 s...</span>
     </div>
     <div id="calOverlay" style="position:absolute;bottom:0;left:0;width:100%;padding:10px;background:rgba(0,0,0,0.6);text-align:center;z-index:5">
-      <div style="color:#fff;font-size:14px">Point camera at sensor in initial state (no gas)</div>
+      <div style="color:#fff;font-size:14px">Calibrate at RH 20%, H2 0% · Align flame above droplet</div>
     </div>
   </div>
 
@@ -179,13 +180,13 @@ body{
       <div class="conf" id="sConf"></div>
     </div>
     <div class="card">
-      <h3>Concentration</h3>
+      <h3>Response Detection</h3>
       <div class="row">
-        <span class="lbl">H&#8322;</span>
+        <span class="lbl">H&#8322; response</span>
         <span class="val" id="h2Val">-</span>
       </div>
       <div class="row">
-        <span class="lbl">Humidity</span>
+        <span class="lbl">RH &#8805;70% response</span>
         <span class="val" id="rhVal">-</span>
       </div>
     </div>
@@ -200,9 +201,11 @@ body{
   <div class="dbg" id="dbg"></div>
 </div>
 
+<script src="sensor-model.js?v=20260813-1"></script>
 <script>
+var APP_VERSION='2026.08.13-H2-RH-v1';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
-// Default baseline from training data initial state (H2_only videos, h2<0.3%)
+// Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
   flame_L:129.8,flame_a:119.1,flame_b:159.3,
   drop_L:132.8,drop_a:123.1,drop_b:145.6,
@@ -340,7 +343,7 @@ function doClassify(f){
   // Reported only when the call is confident, and only as a band. A regression on RH
   // was tried and rejected: it scored no better than predicting the mean.
   var rh=null;
-  if(state==='H2O_only') rh=(p>=0.65?'high (RH≥75%)':'likely high');
+  if(state==='H2O_only') rh=(p>=0.65?'high (RH≥70%)':'likely high');
 
   var conf;
   if(p>=0.65||p<=0.20) conf='high';
@@ -357,12 +360,86 @@ function doClassify(f){
 
 // ===== UI =====
 var SC={no_sensor:'#999',initial:'#66bb6a',H2O_only:'#42a5f5',undecided:'#ff9800'};
-var SN={no_sensor:'No Sensor Detected',initial:'Humidity Not High',
-        H2O_only:'High Humidity',undecided:'Undecided'};
+var SN={no_sensor:'No Sensor Detected',initial:'Initial / Low Response',
+        H2O_only:'H2O Response',undecided:'Uncertain / Retake'};
 var SM={no_sensor:['Sensor not found','#999'],
         initial:['Humidity below the detection band','#66bb6a'],
         H2O_only:['High Humidity Detected','#42a5f5'],
         undecided:['Too close to call — retake or improve lighting','#ff9800']};
+
+// ===== DUAL-STATE MODEL (generated from the 2026-08 recordings) =====
+function stateDelta(f,name){
+  // Match training: per-chip baseline delta for each shape measurement.
+  return f[name]-BL[name];
+}
+function stateFeatures(model,f){
+  var v=[],names=model.features;
+  for(var i=0;i<names.length;i++){
+    var name=names[i];
+    if(name==='flame_drop_a')v.push(stateDelta(f,'flame_a')-stateDelta(f,'drop_a'));
+    else if(name==='flame_drop_b')v.push(stateDelta(f,'flame_b')-stateDelta(f,'drop_b'));
+    else v.push(stateDelta(f,name));
+  }
+  return v;
+}
+function forestProb(model,v){
+  var sum=0;
+  for(var i=0;i<model.trees.length;i++){
+    var tree=model.trees[i],node=0;
+    while(tree.feature[node]>=0){
+      node=v[tree.feature[node]]<=tree.threshold[node]?tree.left[node]:tree.right[node];
+    }
+    sum+=tree.probability[node];
+  }
+  return sum/model.trees.length;
+}
+function ridgeEstimate(model,f){
+  if(!model)return null;
+  var v=stateFeatures(model,f),out=model.intercept;
+  for(var i=0;i<v.length;i++)out+=model.coefficients[i]*v[i];
+  return out;
+}
+doClassify=function(f){
+  var hv=stateFeatures(SENSOR_MODEL.h2_presence,f);
+  var rv=stateFeatures(SENSOR_MODEL.rh_high,f);
+  var h2p=forestProb(SENSOR_MODEL.h2_presence,hv);
+  var rhp=forestProb(SENSOR_MODEL.rh_high,rv);
+  var h2=h2p>=SENSOR_MODEL.h2_presence.threshold;
+  var rh=rhp>=SENSOR_MODEL.rh_high.threshold;
+  var margin=Math.min(Math.abs(h2p-.5),Math.abs(rhp-.5));
+  var uncertain=margin<.10;
+  var state=uncertain?'undecided':(h2?(rh?'simultaneous':'H2_only'):(rh?'H2O_only':'initial'));
+  var h2Estimate=null,rhEstimate=null,h2OutOfRange=false,rhOutOfRange=false,rhSimPending=false;
+  if(!uncertain){
+    var rawH2=ridgeEstimate(SENSOR_MODEL.h2_concentration,f);
+    var rawRH=ridgeEstimate(SENSOR_MODEL.rh_regression,f);
+    h2OutOfRange=h2&&(rawH2<2.5||rawH2>4.5);
+    h2Estimate=h2&&!h2OutOfRange?Math.max(3,Math.min(4,rawH2)):null;
+    // The H2O-only RH calibration overestimates low simultaneous RH. Keep the
+    // state result, but hide its number until the simultaneous correction is validated.
+    rhSimPending=state==='simultaneous';
+    rhOutOfRange=rh&&!rhSimPending&&rawRH>90;
+    rhEstimate=rh&&!rhSimPending&&rawRH>=65&&rawRH<=95?Math.max(70,Math.min(90,rawRH)):null;
+  }
+  return{state:state,conf:margin>=.20?'high':(margin>=.10?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
+    h2Estimate:h2Estimate,rhEstimate:rhEstimate,h2OutOfRange:h2OutOfRange,
+    rhOutOfRange:rhOutOfRange,rhSimPending:rhSimPending,
+    h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
+    dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
+    dFlameB:Math.round(stateDelta(f,'flame_b')*10)/10,
+    dDropA:Math.round(stateDelta(f,'drop_a')*10)/10,
+    dDropB:Math.round(stateDelta(f,'drop_b')*10)/10,
+    dTopA:Math.round(stateDelta(f,'top_a')*10)/10,
+    dTopB:Math.round(stateDelta(f,'top_b')*10)/10};
+};
+SC={no_sensor:'#999',initial:'#66bb6a',H2_only:'#ef5350',H2O_only:'#42a5f5',simultaneous:'#8e5ad7',undecided:'#ff9800'};
+SN={no_sensor:'No Sensor Detected',initial:'Initial / Low Response',H2_only:'H2-only Response',
+    H2O_only:'H2O-only Response',simultaneous:'Simultaneous Response',undecided:'Uncertain / Retake'};
+SM={no_sensor:['Sensor not found','#999'],initial:['No strong response','#66bb6a'],
+    H2_only:['Experimental H2 response — not a safety alarm','#ef5350'],
+    H2O_only:['High-humidity response detected','#42a5f5'],
+    simultaneous:['H2 and high-humidity responses detected','#8e5ad7'],
+    undecided:['Probability too close to threshold - align and retake','#ff9800']};
 
 var lastResultText='';
 function showResult(r){
@@ -370,21 +447,28 @@ function showResult(r){
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
-  var vals=(r.p===undefined?'':'p='+r.p+'  ')
+  var vals=(r.h2p===undefined?'':'pH2='+r.h2p+' pRH='+r.rhp+'  ')
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
-  lastResultText=(SN[r.state]||r.state)+' | '+vals+(r.rh?' | '+r.rh:'');
+  lastResultText=(SN[r.state]||r.state)+' | '+vals;
   document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>';
 
-  // H2 has no validated model behind it, so the app states that rather than guessing.
   var h2E=document.getElementById('h2Val');
-  h2E.textContent='Not measured';
-  h2E.style.color='#999';
+  h2E.textContent=r.state==='no_sensor'?'-':(r.state==='undecided'?'Uncertain':
+    (!calibrated?'Calibrate first':(!r.h2?'H2 response not detected':
+      (r.h2OutOfRange?'H2 response detected — concentration outside validated range':
+        (r.h2Estimate==null?'H2 response detected — concentration not quantified':
+          r.h2Estimate.toFixed(1)+'% (experimental ±0.4%p)')))));
+  h2E.style.color=r.h2?'#ef5350':'#222';
 
   var rhE=document.getElementById('rhVal');
   if(r.state==='no_sensor'){rhE.textContent='-';rhE.style.color='#999';}
-  else if(r.state==='undecided'){rhE.textContent='Undecided';rhE.style.color='#ff9800';}
-  else if(r.rh){rhE.textContent=r.rh;rhE.style.color='#42a5f5';}
-  else{rhE.textContent='Not high';rhE.style.color='#222';}
+  else if(r.state==='undecided'){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
+  else if(!calibrated){rhE.textContent='Calibrate first';rhE.style.color='#ff9800';}
+  else if(r.rhSimPending){rhE.textContent='Simultaneous RH correction pending — number hidden';rhE.style.color='#ff9800';}
+  else if(r.rhOutOfRange){rhE.textContent='>90% H2O-only-equivalent RH (out of range)';rhE.style.color='#ef5350';}
+  else if(!r.rh){rhE.textContent='High-RH response not detected';rhE.style.color='#222';}
+  else if(r.rhEstimate==null){rhE.textContent='RH response detected — concentration not quantified';rhE.style.color='#222';}
+  else{rhE.textContent=r.rhEstimate.toFixed(0)+'% H2O-only-equivalent RH (experimental ±8%p)';rhE.style.color='#42a5f5';}
 
   var msg=SM[r.state]||['Unknown','#999'];
   document.getElementById('stDot').style.background=msg[1];
@@ -540,7 +624,7 @@ window.addEventListener('focus',function(){resumeCam();});
 function capture(){
   if(captured||!camReady) return;
   if(!calibrated&&!calMode){
-    document.getElementById('dbg').textContent='⚠ Calibrate first: photograph sensor in initial state';
+    document.getElementById('dbg').textContent='Calibrate first at RH 20%, H2 0%';
     return;
   }
   var vw=vid.videoWidth, vh=vid.videoHeight;
@@ -549,13 +633,21 @@ function capture(){
   document.getElementById('shutterBtn').classList.add('hidden');
   document.getElementById('procOverlay').classList.remove('hidden');
   cvs.width=vw; cvs.height=vh;
-  var fi=0, nF=3;
+  // Build one causal five-second observation from eleven frames. This matches
+  // the stable-segment validation scale and suppresses momentary reflections.
+  var fi=0, nF=11;
+  var procText=document.getElementById('procText');
+  if(procText) procText.textContent='Accumulating 5 s...';
   function grabNext(){
     ctx2d.globalAlpha=1.0/(fi+1);
     ctx2d.drawImage(vid,0,0);
     fi++;
-    if(fi<nF){ setTimeout(grabNext,50); }
-    else{ ctx2d.globalAlpha=1.0; finishCapture(); }
+    if(fi<nF){ setTimeout(grabNext,500); }
+    else{
+      ctx2d.globalAlpha=1.0;
+      if(procText) procText.textContent='Analyzing...';
+      finishCapture();
+    }
   }
   grabNext();
 }
@@ -652,11 +744,11 @@ function detectAndClassify(src){
     cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
     var blurred=new cv.Mat();
     cv.GaussianBlur(gray,blurred,new cv.Size(9,9),2);
-    var minR=Math.round(Math.min(h,w)*0.15);
-    var maxR=Math.round(Math.min(h,w)*0.45);
+    var minR=Math.round(Math.min(h,w)*0.07);
+    var maxR=Math.round(Math.min(h,w)*0.42);
     var circles=new cv.Mat();
     cv.HoughCircles(blurred,circles,cv.HOUGH_GRADIENT,1.2,
-      Math.round(Math.min(h,w)/2),80,40,minR,maxR);
+      Math.round(Math.min(h,w)*0.12),80,35,minR,maxR);
     blurred.delete();
 
     if(circles.cols===0){
@@ -683,7 +775,7 @@ function detectAndClassify(src){
       var cy=Math.round(circles.data32F[i*3+1]);
       var r=Math.round(circles.data32F[i*3+2]);
       var ir=Math.round(r*0.5);
-      var sum=0,cnt=0,chromaCnt=0;
+      var sum=0,cnt=0,chromaCnt=0,minWarmY=1e9,maxWarmY=-1;
       for(var dy=-ir;dy<=ir;dy+=3){
         for(var dx=-ir;dx<=ir;dx+=3){
           var px=cx+dx,py=cy+dy;
@@ -691,12 +783,16 @@ function detectAndClassify(src){
             sum+=gray.ucharAt(py,px);cnt++;
             var si=(py*selCols+px)*3;
             var sa=selData[si+1]-128, sb=selData[si+2]-128;
-            if(Math.sqrt(sa*sa+sb*sb)>15) chromaCnt++;
+            if(Math.sqrt(sa*sa+sb*sb)>15&&selData[si+2]>133){
+              chromaCnt++;if(py<minWarmY)minWarmY=py;if(py>maxWarmY)maxWarmY=py;
+            }
           }
         }
       }
       var avg=cnt>0?sum/cnt:0;
-      var score=cnt>0?chromaCnt/cnt:0;
+      var coverage=cnt>0?chromaCnt/cnt:0;
+      var span=maxWarmY>=minWarmY?(maxWarmY-minWarmY)/Math.max(r,1):0;
+      var score=(cy>h*0.50)?0:(coverage+0.05*Math.min(span,1.8))*Math.sqrt(r/Math.min(h,w));
       if(score>bScore){bScore=score;bBr=avg;bCx=cx;bCy=cy;bR=r;}
     }
     nCircles=circles.cols;
@@ -720,8 +816,9 @@ function detectAndClassify(src){
   var x1=Math.max(0,bCx-innerR),x2=Math.min(w,bCx+innerR);
   var innerR2=innerR*innerR;
 
-  // 3. Top-chroma percentile extraction
-  // Collect all pixels inside sensor circle with their LAB and chroma
+  // 3. Patch-balanced, shape-specific extraction
+  // Collect pixels first, then use the neutral white/gray pieces inside the
+  // chamber to remove illumination colour cast before measuring the shapes.
   var allPx=[];
   for(var yy=y1;yy<y2;yy++){
     for(var xx=x1;xx<x2;xx++){
@@ -731,7 +828,7 @@ function detectAndClassify(src){
       var L=labData[ii],a=labData[ii+1],b=labData[ii+2];
       var ao=a-128,bo=b-128;
       var c=Math.sqrt(ao*ao+bo*bo);
-      allPx.push({L:L,a:a,b:b,c:c,x:xx,y:yy});
+      allPx.push({L:L,a:a,b:b,c:c,x:xx,y:yy,nx:ddx/Math.max(bR,1),ny:ddy/Math.max(bR,1)});
     }
   }
   lab.delete();
@@ -740,7 +837,28 @@ function detectAndClassify(src){
     return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'Too few pixels ('+allPx.length+')'};
   }
 
-  // Sort by chroma for percentile extraction
+  function numericMedian(values){
+    values.sort(function(a,b){return a-b;});
+    var m=Math.floor(values.length/2);
+    return values.length%2?values[m]:(values[m-1]+values[m])/2;
+  }
+  var neutral=[];
+  for(var i=0;i<allPx.length;i++)if(allPx[i].c<8&&allPx[i].L>140)neutral.push(allPx[i]);
+  var patchDA=0,patchDB=0,patchScale=1;
+  if(neutral.length>=50){
+    patchDA=numericMedian(neutral.map(function(p){return p.a;}))-128;
+    patchDB=numericMedian(neutral.map(function(p){return p.b;}))-128;
+    var neutralL=neutral.map(function(p){return p.L;}).sort(function(a,b){return a-b;});
+    var whiteL=neutralL[Math.min(neutralL.length-1,Math.floor(neutralL.length*.90))];
+    patchScale=Math.max(.8,Math.min(1.5,210/Math.max(whiteL,1)));
+  }
+  for(var i=0;i<allPx.length;i++){
+    var p=allPx[i];p.L=Math.max(0,Math.min(255,p.L*patchScale));
+    p.a=Math.max(0,Math.min(255,p.a-patchDA));p.b=Math.max(0,Math.min(255,p.b-patchDB));
+    var pa=p.a-128,pb=p.b-128;p.c=Math.sqrt(pa*pa+pb*pb);
+  }
+
+  // Sort by corrected chroma for background and debug statistics.
   allPx.sort(function(a,b){return a.c-b.c;});
   var n=allPx.length;
 
@@ -761,26 +879,30 @@ function detectAndClassify(src){
   for(var i=0;i<bgPx.length;i++){bgL+=bgPx[i].L;bgA+=bgPx[i].a;bgB+=bgPx[i].b;bgPx[i].cat='bg';}
   bgL/=bgPx.length;bgA/=bgPx.length;bgB/=bgPx.length;
 
-  // Split high-chroma pixels (chroma>15) by b-channel median -> flame (high b) / drop (low b)
-  var hiC=[];
-  for(var i=0;i<n;i++){if(allPx[i].c>15) hiC.push(allPx[i]);}
-
-  var flameL,flameA,flameB,dropL,dropA,dropB;
-  if(hiC.length>20){
-    hiC.sort(function(a,b){return a.b-b.b;});
-    var mid=Math.floor(hiC.length/2);
-    var flamePx=hiC.slice(mid); // higher b = flame
-    var dropPx=hiC.slice(0,mid); // lower b = drop
-    flameL=0;flameA=0;flameB=0;
-    for(var i=0;i<flamePx.length;i++){flameL+=flamePx[i].L;flameA+=flamePx[i].a;flameB+=flamePx[i].b;if(flamePx[i].cat!=='top')flamePx[i].cat='flame';}
-    flameL/=flamePx.length;flameA/=flamePx.length;flameB/=flamePx.length;
-    dropL=0;dropA=0;dropB=0;
-    for(var i=0;i<dropPx.length;i++){dropL+=dropPx[i].L;dropA+=dropPx[i].a;dropB+=dropPx[i].b;if(dropPx[i].cat!=='top')dropPx[i].cat='drop';}
-    dropL/=dropPx.length;dropA/=dropPx.length;dropB/=dropPx.length;
-  }else{
-    flameL=topL;flameA=topA;flameB=topB;
-    dropL=topL;dropA=topA;dropB=topB;
+  function shapePixels(zone,name){
+    var scored=[];
+    for(var i=0;i<allPx.length;i++){
+      var p=allPx[i];if(!zone(p))continue;
+      var dL=.35*(p.L-bgL),da=p.a-bgA,db=p.b-bgB;
+      scored.push({p:p,d:Math.sqrt(dL*dL+da*da+db*db)});
+    }
+    scored.sort(function(a,b){return a.d-b.d;});
+    var start=Math.floor(scored.length*.65),out=[];
+    for(var i=start;i<scored.length;i++)if(scored[i].d>=6)out.push(scored[i].p);
+    if(out.length<12)out=scored.slice(Math.max(0,scored.length-Math.max(12,Math.floor(scored.length*.2)))).map(function(q){return q.p;});
+    for(var i=0;i<out.length;i++)if(out[i].cat!=='top')out[i].cat=name;
+    return out;
   }
+  var flamePx=shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=-.62&&p.ny<=-.02;},'flame');
+  var dropPx=shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=.02&&p.ny<=.68;},'drop');
+  function meanLab(px,fallback){
+    if(!px.length)return fallback;var L=0,a=0,b=0;
+    for(var i=0;i<px.length;i++){L+=px[i].L;a+=px[i].a;b+=px[i].b;}
+    return[L/px.length,a/px.length,b/px.length];
+  }
+  var fm=meanLab(flamePx,[topL,topA,topB]),dm=meanLab(dropPx,[topL,topA,topB]);
+  var flameL=fm[0],flameA=fm[1],flameB=fm[2];
+  var dropL=dm[0],dropA=dm[1],dropB=dm[2];
 
   // 4. Classify
   var feat={
@@ -796,11 +918,13 @@ function detectAndClassify(src){
     ') dr=('+dropA.toFixed(1)+','+dropB.toFixed(0)+
     ') fl=('+flameA.toFixed(1)+','+flameB.toFixed(0)+
     ') bg=('+bgA.toFixed(1)+','+bgB.toFixed(0)+
-    ') H2='+clf.h2S+' H2O='+clf.h2oS+' hue='+clf.hue+(calibrated?' [CAL]':' [DEF]')+' ['+roiSource+']';
+    ') pH2='+(clf.h2p==null?'-':Number(clf.h2p).toFixed(3))+
+    ' pRH='+(clf.rhp==null?'-':Number(clf.rhp).toFixed(3))+
+    (calibrated?' [CAL]':' [DEF]')+' ['+roiSource+'] '+APP_VERSION;
   clf._dbgGeo={cx:bCx,cy:bCy,r:bR,innerR:innerR,w:w,h:h,
     totalCircles:nCircles,brightness:Math.round(bBr),roiSource:roiSource,
     chromaScore:bScore<0?null:Math.round(bScore*100),
-    nPx:n,nTop:topPx.length,nBg:bgPx.length,nHiC:hiC.length,
+    nPx:n,nTop:topPx.length,nBg:bgPx.length,nHiC:flamePx.length+dropPx.length,
     pixels:allPx};
   return clf;
 }
@@ -842,6 +966,11 @@ function drawDebugOverlay(r){
 
 // ===== LOAD OPENCV =====
 function onReady(){
+  if(typeof window.SENSOR_MODEL==='undefined'){
+    document.getElementById('loadingScreen').innerHTML=
+      '<p style="color:#f44336;padding:40px">H2/RH model failed to load.<br>Reload the page without cache.</p>';
+    return;
+  }
   document.getElementById('loadingScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   loadCal();
