@@ -757,15 +757,12 @@ function finishCapture(){
       if(calMode&&r.state!=='no_sensor'){
         var f=r._raw;
         saveCal(f);
-        var g=r._dbgGeo;
-        if(g&&g.cx&&g.cy&&g.r){
-          manualROI={cx:g.cx/g.w,cy:g.cy/g.h,rPct:Math.round(g.r/Math.min(g.h,g.w)*100)};
-          updateROIUI();
-          drawROIOverlay();
-        }
+        // Do not freeze the calibration circle position. Hand-held photos and
+        // saved video frames shift slightly, so each analysis frame must locate
+        // its own chamber. Manual ROI remains available only when explicitly set.
         calMode=false;
         document.getElementById('calBtn').style.background='#2196F3';
-        document.getElementById('dbg').textContent='Calibrated! ROI locked.';
+        document.getElementById('dbg').textContent='Calibrated! ROI will auto-align for each photo.';
         document.getElementById('procOverlay').classList.add('hidden');
         var co=document.getElementById('calOverlay');if(co) co.style.display='none';
         document.getElementById('calBar').style.display='';
