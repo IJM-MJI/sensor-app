@@ -61,7 +61,7 @@ H2 ramp 타임라인은 명목 농도로 보존합니다. H2-only 영상은 제�
 
 `training/ordinal_concentration_analysis.py`는 H2-only의 불꽃과 H2O-only의 물방울을 중심으로 농도 증가에 따른 보정 LAB 색 궤적을 비교합니다. 상대 형상 색은 프레임 공통 조명 변화를 제거하는 내부 기준으로만 사용합니다. H2 recovery 중간 프레임은 명목 H2가 0%여도 광학 반응이 남아 있으므로 0% 학습에서 제외하고, 실제 initial과 recovery 마지막만 사용합니다. 짧은 단계는 농도 변경 후 1초부터 포함하고 희소 단계가 모델 선택에서 동일한 비중을 갖도록 stage-balanced accuracy를 사용합니다.
 
-두 검증을 함께 생성합니다. 영상 하나를 통째로 제외하면 H2 정확도 53.9%(stage-balanced 34.8%, MAE 0.78%p), RH 정확도 34.4%(stage-balanced 30.1%, MAE 14.96%p)입니다. 동일 run의 다른 5초 시간 블록으로 검증하면 H2 정확도 71.8%(stage-balanced 50.6%, MAE 0.51%p), RH 정확도 63.4%(stage-balanced 55.9%, MAE 6.60%p)입니다. 후자는 사용 시 calibration으로 촬영 run 차이를 일부 알고 있는 상황에 가까우나 완전히 새로운 run에 대한 성능은 아닙니다. 따라서 전체 범위 숫자는 아직 앱에 배포하지 않았습니다.
+RH는 20%와 30%를 하나의 `20–30%` 구간으로 합치고 40–90%는 10% 단위로 유지합니다. 이 구간화 후 영상 하나를 통째로 제외하면 RH 정확도 35.7%(stage-balanced 32.9%, MAE 14.95%p), 동일 run의 다른 5초 블록에서는 정확도 66.1%(stage-balanced 62.4%, MAE 6.10%p)입니다. H2에는 `≥1`, `≥2`, `≥3`, `≥4%` 누적 경계를 학습하는 순서형 후보도 추가했지만 명목 단계보다 늦게 나타나는 색 반응 때문에 일반 다항 로지스틱보다 낮아 선택되지 않았습니다. 최종 H2 결과는 영상 전체 제외 정확도 53.9%(stage-balanced 34.8%, MAE 0.78%p), 동일 run 5초 블록 정확도 71.8%(stage-balanced 50.6%, MAE 0.51%p)입니다. 후자는 calibration으로 촬영 run 차이를 일부 알고 있는 상황에 가까우나 완전히 새로운 run에 대한 성능은 아닙니다. 따라서 전체 범위 숫자는 아직 앱에 배포하지 않았습니다.
 
 Calibration 프레임에서 불꽃/물방울 픽셀을 완전히 고정하는 방식도 별도로 시험했습니다. RH 70--90% 회귀 오차는 4.97%p로 감소했지만 4상태 balanced accuracy가 70.1%에서 60.1%로 낮아지고 전체 농도 단계 오차가 증가해 채택하지 않았습니다. 다음 추출기는 원 위치를 유지하되 촬영 중의 미세 회전·이동을 먼저 정합한 뒤 고정 마스크를 적용해야 합니다.
 
@@ -91,3 +91,4 @@ python -m venv .venv
 정량 모델 후보와 영상 단위 오차는 `training/quantitative_analysis.py`로 비교합니다. 논문용 검증 Figure는 `training/output/quantitative/quantitative_validation`의 PNG(600 dpi), PDF, SVG로 생성되며, 동일 Figure의 점과 전체 예측값을 CSV로 함께 저장합니다.
 
 전체 단계별 색 궤적과 confusion matrix는 `training/output/ordinal_concentration/ordinal_concentration_validation`의 PNG(500 dpi), PDF, SVG로 생성되고 프레임별 예측은 같은 폴더의 `predictions.csv`에 저장됩니다.
+H2 0/1/2%의 명목 단계 마지막 프레임을 같은 크기로 정렬한 판독용 montage는 `training/make_h2_low_stage_montage.py`로 생성합니다.

@@ -16,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.base import clone
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.ensemble import ExtraTreesClassifier, ExtraTreesRegressor, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import confusion_matrix
@@ -28,10 +28,51 @@ from train_models import CACHE_VERSION, read_csv
 
 
 TASKS = {
-    "H2": {"kind": "h2_only", "label": "h2_value", "levels": [0, 1, 2, 3, 4], "region": "flame"},
-    "RH": {"kind": "rh_only", "label": "rh_value", "levels": [20, 30, 40, 50, 60, 70, 80, 90], "region": "drop"},
+    "H2": {"kind": "h2_only", "label": "h2_value", "levels": [0, 1, 2, 3, 4],
+           "display_levels": ["0", "1", "2", "3", "4"], "region": "flame"},
+    "RH": {"kind": "rh_only", "label": "rh_value", "levels": [25, 40, 50, 60, 70, 80, 90],
+           "display_levels": ["20–30", "40", "50", "60", "70", "80", "90"], "region": "drop"},
 }
 MIN_STABLE_SECONDS = 1.0
+
+
+class OrdinalLogistic(BaseEstimator, ClassifierMixin):
+    """Learn P(level >= threshold) so neighbouring stages remain ordered."""
+
+    def __init__(self, C=.5):
+        self.C = C
+
+    def fit(self, x, y):
+        self.classes_ = np.asarray(sorted(set(y)), dtype=float)
+        self.models_ = []
+        for threshold in self.classes_[1:]:
+            model = make_pipeline(StandardScaler(), LogisticRegression(
+                C=self.C, max_iter=3000, class_weight="balanced", random_state=42))
+            model.fit(x, np.asarray(y) >= threshold)
+            self.models_.append(model)
+        return self
+
+    def predict_proba(self, x):
+        cumulative = np.column_stack([
+            model.predict_proba(x)[:, 1] for model in self.models_
+        ])
+        cumulative = np.minimum.accumulate(cumulative, axis=1)
+        probability = np.column_stack([
+            1 - cumulative[:, 0],
+            *[cumulative[:, j - 1] - cumulative[:, j]
+              for j in range(1, cumulative.shape[1])],
+            cumulative[:, -1],
+        ])
+        probability = np.clip(probability, 0, 1)
+        return probability / np.maximum(probability.sum(axis=1, keepdims=True), 1e-9)
+
+    def predict(self, x):
+        return self.classes_[np.argmax(self.predict_proba(x), axis=1)]
+
+
+def target_value(row, config):
+    value = float(row[config["label"]])
+    return 25.0 if config["label"] == "rh_value" and value <= 30 else value
 
 
 def add_stability(rows):
@@ -68,6 +109,7 @@ def augment(row, region):
 
 def candidates():
     return {
+        "ordinal_logistic": OrdinalLogistic(C=.5),
         "multinomial_logistic": make_pipeline(StandardScaler(), LogisticRegression(
             C=.5, max_iter=3000, class_weight="balanced", random_state=42)),
         "extra_trees_classifier": ExtraTreesClassifier(
@@ -90,7 +132,7 @@ def nearest_level(values, levels):
 def evaluate(rows, config, estimator, name, protocol="video_holdout"):
     levels = np.asarray(config["levels"], dtype=float)
     x = np.asarray([augment(row, config["region"]) for row in rows])
-    y = np.asarray([float(row[config["label"]]) for row in rows])
+    y = np.asarray([target_value(row, config) for row in rows])
     groups = np.asarray([str(row["group"]) for row in rows])
     prediction = np.full(len(y), np.nan)
     confidence = np.full(len(y), np.nan)
@@ -163,7 +205,7 @@ def evaluate(rows, config, estimator, name, protocol="video_holdout"):
 def colour_path(rows, config):
     output = []
     for level in config["levels"]:
-        use = [row for row in rows if float(row[config["label"]]) == level]
+        use = [row for row in rows if target_value(row, config) == level]
         values = np.asarray([augment(row, config["region"]) for row in use])
         output.append({
             "level": level, "n": len(use), "n_videos": len({str(row["group"]) for row in use}),
@@ -200,10 +242,10 @@ def plot(output, reports, paths):
                          title=f"{task} ordered colour trajectory")
         axes[0, col].legend(frameon=False, fontsize=7)
         selected = reports[task]["selected"]
-        levels = config["levels"]
-        draw_confusion(axes[1, col], reports[task]["models"][selected]["confusion"], levels,
+        display_levels = config["display_levels"]
+        draw_confusion(axes[1, col], reports[task]["models"][selected]["confusion"], display_levels,
                        f"{task}: video-held-out")
-        draw_confusion(axes[2, col], reports[task]["within_run_models"][selected]["confusion"], levels,
+        draw_confusion(axes[2, col], reports[task]["within_run_models"][selected]["confusion"], display_levels,
                        f"{task}: within-run 5 s blocks")
     fig.suptitle("Limited-data single-frame concentration validation", weight="bold")
     for suffix, kwargs in (("png", {"dpi": 500}), ("pdf", {}), ("svg", {})):
