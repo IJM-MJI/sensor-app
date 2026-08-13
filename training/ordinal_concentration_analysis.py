@@ -22,6 +22,7 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import confusion_matrix
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import StratifiedGroupKFold
 
 from train_models import CACHE_VERSION, read_csv
 
@@ -30,6 +31,7 @@ TASKS = {
     "H2": {"kind": "h2_only", "label": "h2_value", "levels": [0, 1, 2, 3, 4], "region": "flame"},
     "RH": {"kind": "rh_only", "label": "rh_value", "levels": [20, 30, 40, 50, 60, 70, 80, 90], "region": "drop"},
 }
+MIN_STABLE_SECONDS = 1.0
 
 
 def add_stability(rows):
@@ -54,9 +56,14 @@ def add_stability(rows):
 
 def augment(row, region):
     L, a, b = (float(row[f"{region}_{channel}"]) for channel in "Lab")
+    reference = "drop" if region == "flame" else "flame"
+    ref_L, ref_a, ref_b = (float(row[f"{reference}_{channel}"]) for channel in "Lab")
     chroma = float(np.hypot(a, b))
     hue = float(np.arctan2(b, a))
-    return [L, a, b, chroma, np.sin(hue), np.cos(hue)]
+    # The target shape remains the sensing signal. The other printed shape is an
+    # internal reference that removes colour/brightness motion shared by the frame.
+    return [L, a, b, chroma, np.sin(hue), np.cos(hue),
+            L - ref_L, a - ref_a, b - ref_b]
 
 
 def candidates():
@@ -80,16 +87,36 @@ def nearest_level(values, levels):
     return levels[np.argmin(np.abs(np.asarray(values)[:, None] - levels[None, :]), axis=1)]
 
 
-def evaluate(rows, config, estimator, name):
+def evaluate(rows, config, estimator, name, protocol="video_holdout"):
     levels = np.asarray(config["levels"], dtype=float)
     x = np.asarray([augment(row, config["region"]) for row in rows])
     y = np.asarray([float(row[config["label"]]) for row in rows])
     groups = np.asarray([str(row["group"]) for row in rows])
     prediction = np.full(len(y), np.nan)
     confidence = np.full(len(y), np.nan)
-    for group in sorted(set(groups)):
-        test, train = groups == group, groups != group
-        fitted = clone(estimator).fit(x[train], y[train])
+    if protocol == "video_holdout":
+        splits = [(groups != group, groups == group) for group in sorted(set(groups))]
+    elif protocol == "within_run_blocks":
+        # Five-second blocks prevent adjacent frames from being split individually,
+        # while retaining the calibration/domain information from each recording.
+        blocks = np.asarray([f"{row['video']}::{int(float(row['time']) // 5)}" for row in rows])
+        splitter = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=42)
+        splits = list(splitter.split(x, y, groups=blocks))
+    else:
+        raise ValueError(protocol)
+    for train, test in splits:
+        fitted = clone(estimator)
+        fit_kwargs = {}
+        if name.endswith("rounded"):
+            counts = {level: int(np.sum(y[train] == level)) for level in levels}
+            sample_weight = np.asarray([
+                len(train) / max(len(levels) * counts[value], 1) for value in y[train]
+            ])
+            if hasattr(fitted, "steps"):
+                fit_kwargs[f"{fitted.steps[-1][0]}__sample_weight"] = sample_weight
+            else:
+                fit_kwargs["sample_weight"] = sample_weight
+        fitted.fit(x[train], y[train], **fit_kwargs)
         if name.endswith("rounded"):
             raw = np.asarray(fitted.predict(x[test])).reshape(-1)
             prediction[test] = nearest_level(raw, levels)
@@ -114,6 +141,7 @@ def evaluate(rows, config, estimator, name):
             "mae": float(np.mean(np.abs(prediction[use] - y[use]))),
         })
     metric = {
+        "protocol": protocol,
         "exact_accuracy": float(np.mean(prediction == y)),
         "within_one_step": float(np.mean(level_distance <= 1)),
         "mae": float(np.mean(np.abs(prediction - y))),
@@ -123,6 +151,8 @@ def evaluate(rows, config, estimator, name):
         "n_frames": len(y), "n_videos": len(per_video), "per_video": per_video,
         "confusion": confusion_matrix(y, prediction, labels=levels).tolist(),
     }
+    cm = np.asarray(metric["confusion"], dtype=float)
+    metric["stage_balanced_accuracy"] = float(np.mean(np.diag(cm) / np.maximum(cm.sum(axis=1), 1)))
     predictions = [{
         "video": row["video"], "group": group, "time": row["time"],
         "reference": float(truth), "prediction": float(estimate), "confidence": float(conf),
@@ -145,8 +175,21 @@ def colour_path(rows, config):
     return output
 
 
+def draw_confusion(axis, matrix, levels, title):
+    cm = np.asarray(matrix, dtype=float)
+    cm /= np.maximum(cm.sum(axis=1, keepdims=True), 1)
+    axis.imshow(cm, vmin=0, vmax=1, cmap="Blues")
+    for i in range(len(levels)):
+        for j in range(len(levels)):
+            axis.text(j, i, f"{cm[i,j]:.2f}", ha="center", va="center", fontsize=6,
+                      color="white" if cm[i,j] > .55 else "black")
+    axis.set_xticks(range(len(levels)), levels)
+    axis.set_yticks(range(len(levels)), levels)
+    axis.set(xlabel="Predicted concentration (%)", ylabel="Reference concentration (%)", title=title)
+
+
 def plot(output, reports, paths):
-    fig, axes = plt.subplots(2, 2, figsize=(8.2, 6.7), constrained_layout=True)
+    fig, axes = plt.subplots(3, 2, figsize=(8.2, 9.5), constrained_layout=True)
     for col, task in enumerate(("H2", "RH")):
         config = TASKS[task]; path = paths[task]
         x = [row["level"] for row in path]
@@ -157,20 +200,12 @@ def plot(output, reports, paths):
                          title=f"{task} ordered colour trajectory")
         axes[0, col].legend(frameon=False, fontsize=7)
         selected = reports[task]["selected"]
-        pred = reports[task]["predictions"]
         levels = config["levels"]
-        cm = np.asarray(reports[task]["models"][selected]["confusion"], dtype=float)
-        cm /= np.maximum(cm.sum(axis=1, keepdims=True), 1)
-        axes[1, col].imshow(cm, vmin=0, vmax=1, cmap="Blues")
-        for i in range(len(levels)):
-            for j in range(len(levels)):
-                axes[1, col].text(j, i, f"{cm[i,j]:.2f}", ha="center", va="center", fontsize=6,
-                                  color="white" if cm[i,j] > .55 else "black")
-        axes[1, col].set_xticks(range(len(levels)), levels)
-        axes[1, col].set_yticks(range(len(levels)), levels)
-        axes[1, col].set(xlabel="Predicted concentration (%)", ylabel="Reference concentration (%)",
-                         title=f"{task}: {selected}")
-    fig.suptitle("Single-frame ordinal concentration validation (video-wise holdout)", weight="bold")
+        draw_confusion(axes[1, col], reports[task]["models"][selected]["confusion"], levels,
+                       f"{task}: video-held-out")
+        draw_confusion(axes[2, col], reports[task]["within_run_models"][selected]["confusion"], levels,
+                       f"{task}: within-run 5 s blocks")
+    fig.suptitle("Limited-data single-frame concentration validation", weight="bold")
     for suffix, kwargs in (("png", {"dpi": 500}), ("pdf", {}), ("svg", {})):
         fig.savefig(output / f"ordinal_concentration_validation.{suffix}", **kwargs)
     plt.close(fig)
@@ -185,27 +220,43 @@ def main():
     for task, config in TASKS.items():
         task_rows = [row for row in rows if row["kind"] == config["kind"]
                      and row.get(config["label"]) is not None
-                     and float(row[config["label"] + "_stable_seconds"]) >= 4.5]
+                     and float(row[config["label"] + "_stable_seconds"]) >= MIN_STABLE_SECONDS]
+        if task == "H2":
+            # Nominal H2 becomes 0% at recovery start, but the optical response
+            # remains H2-like for most of recovery. Only true initial frames and
+            # the user-specified final recovery tail may supervise the 0% class.
+            task_rows = [row for row in task_rows if float(row["h2_value"]) > 0
+                         or str(row.get("state") or "") in {"none", "baseline_recovery"}]
         paths[task] = colour_path(task_rows, config)
-        models, predictions = {}, {}
+        models, predictions, within_run_models, within_run_predictions = {}, {}, {}, {}
         for name, estimator in candidates().items():
-            models[name], predictions[name] = evaluate(task_rows, config, estimator, name)
-        # Prioritize exact step recognition, use one-step accuracy and MAE as tie breakers.
+            models[name], predictions[name] = evaluate(task_rows, config, estimator, name, "video_holdout")
+            within_run_models[name], within_run_predictions[name] = evaluate(
+                task_rows, config, estimator, name, "within_run_blocks")
+        # Sparse stages count equally. Select a model that works both on an unseen
+        # recording and on held-out time blocks from a calibrated recording.
         selected = max(models, key=lambda name: (
-            models[name]["video_macro_exact_accuracy"],
+            np.sqrt(models[name]["stage_balanced_accuracy"]
+                    * within_run_models[name]["stage_balanced_accuracy"]),
+            models[name]["stage_balanced_accuracy"],
             models[name]["video_macro_within_one_step"],
             -models[name]["video_macro_mae"],
         ))
         reports[task] = {"selected": selected, "models": models,
-                         "colour_path": paths[task], "predictions": predictions[selected]}
-        for row in predictions[selected]:
-            all_predictions.append({"task": task, "model": selected, **row})
+                         "within_run_models": within_run_models,
+                         "colour_path": paths[task], "predictions": predictions[selected],
+                         "within_run_predictions": within_run_predictions[selected]}
+        for protocol, source in (("video_holdout", predictions[selected]),
+                                 ("within_run_blocks", within_run_predictions[selected])):
+            for row in source:
+                all_predictions.append({"task": task, "protocol": protocol, "model": selected, **row})
     (output / "metrics.json").write_text(json.dumps(reports, indent=2), encoding="utf-8")
     with (output / "predictions.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(all_predictions[0])); writer.writeheader(); writer.writerows(all_predictions)
     plot(output, reports, paths)
     print(json.dumps({task: {"selected": value["selected"],
-                            "metric": value["models"][value["selected"]],
+                            "video_holdout": value["models"][value["selected"]],
+                            "within_run_blocks": value["within_run_models"][value["selected"]],
                             "colour_path": value["colour_path"]}
                       for task, value in reports.items()}, indent=2))
 
