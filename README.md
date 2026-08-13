@@ -61,7 +61,7 @@ H2-only 타임라인의 각 구간 끝은 해당 농도에 도달한 시점입�
 
 `training/ordinal_concentration_analysis.py`는 H2-only의 불꽃과 H2O-only의 물방울을 중심으로 농도 증가에 따른 보정 LAB 색 궤적을 비교합니다. 상대 형상 색은 프레임 공통 조명 변화를 제거하는 내부 기준으로만 사용합니다. H2는 ramp endpoint 사이의 연속 농도를 계산한 뒤 가장 가까운 1% 단계로 confusion matrix를 만들며, Recovery도 점진적 하강 타깃으로 포함합니다. 희소 단계가 모델 선택에서 동일한 비중을 갖도록 stage-balanced accuracy를 사용합니다.
 
-RH는 20%와 30%를 하나의 `20–30%` 구간으로 합치고 40–90%는 10% 단위로 유지합니다. 이 구간화 후 영상 하나를 통째로 제외하면 RH 정확도 35.7%(stage-balanced 32.9%, MAE 14.95%p), 동일 run의 다른 5초 블록에서는 정확도 66.1%(stage-balanced 62.4%, MAE 6.10%p)입니다. 수정된 H2 ramp 단계의 영상 전체 제외 confusion 정확도는 44.7%(stage-balanced 38.3%), 동일 run 5초 블록은 정확도 65.9%(stage-balanced 55.7%)입니다. 동일 run에서 단계별 recall은 0/1/2/3/4%가 각각 37/54/46/55/86%로, 잘못된 plateau 해석보다 특히 2%가 크게 개선됐습니다. 연속 0--4% 회귀의 독립 영상 MAE는 Extra Trees 기준 평균 0.71%p입니다. 전체 범위 숫자는 앱에서 별도 검증한 뒤 배포합니다.
+RH는 20%와 30%를 하나의 `20–30%` 구간으로 합치고 40–90%는 10% 단위로 유지합니다. 모든 video-held-out 평가는 테스트 영상의 0% calibration만 허용하고 그 영상의 나머지 프레임 전체를 학습에서 제외하는 `calibration-aware video-held-out`입니다. H2는 자기 초기 불꽃색과 그 대비 변화량을 사용하며 정확도 36.8%(stage-balanced 36.9%, ±1% 이내 61.5%)입니다. 동일 run의 다른 5초 블록에서는 정확도 63.0%(stage-balanced 51.9%, ±1% 이내 91.9%)입니다. 연속 0--4% Ridge 회귀의 calibration-aware 독립 영상 평균 MAE는 0.69%p입니다. RH의 calibration-aware 정확도는 35.7%(stage-balanced 32.9%, MAE 14.95%p), 동일 run 5초 블록은 정확도 66.1%(stage-balanced 62.4%, MAE 6.10%p)입니다. 전체 범위 숫자는 앱에서 별도 검증한 뒤 배포합니다.
 
 Calibration 프레임에서 불꽃/물방울 픽셀을 완전히 고정하는 방식도 별도로 시험했습니다. RH 70--90% 회귀 오차는 4.97%p로 감소했지만 4상태 balanced accuracy가 70.1%에서 60.1%로 낮아지고 전체 농도 단계 오차가 증가해 채택하지 않았습니다. 다음 추출기는 원 위치를 유지하되 촬영 중의 미세 회전·이동을 먼저 정합한 뒤 고정 마스크를 적용해야 합니다.
 

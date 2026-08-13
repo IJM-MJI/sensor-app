@@ -627,16 +627,15 @@ def apply_shared_baselines(rows: list[dict[str, object]]) -> list[dict[str, obje
         by_video[str(row["video"])].append(row)
 
     long_reference = by_video.get("1_90_H2O_only_extract_3min.mp4", [])
-    indoor_h2_reference = by_video.get("1_90_H2_only_test_2.mp4", [])
     baselines: dict[str, dict[str, float]] = {}
     for video, video_rows in by_video.items():
         kind = str(video_rows[0]["kind"])
         if video == "1_90_H2O_only_extract_extra.mp4":
             candidates = [r for r in long_reference if r["rh_value"] == 20]
-        elif video == "1_90_H2_only_test.mp4":
-            # This recording starts at H2 1%; use the matching indoor 0% clip.
-            candidates = [r for r in indoor_h2_reference if float(r["time"]) <= 2.5]
         elif kind == "h2_only":
+            # H2 timelines are ramp endpoints: every recording begins at 0% and
+            # reaches its first stated concentration later. This is exactly the
+            # calibration available to the browser for an otherwise held-out run.
             candidates = [r for r in video_rows if float(r["time"]) <= 2.5]
         elif kind == "rh_only":
             candidates = [r for r in video_rows if r["rh_value"] == 20]

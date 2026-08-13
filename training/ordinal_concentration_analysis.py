@@ -134,8 +134,16 @@ def augment(row, region):
     hue = float(np.arctan2(b, a))
     # The target shape remains the sensing signal. The other printed shape is an
     # internal reference that removes colour/brightness motion shared by the frame.
-    return [L, a, b, chroma, np.sin(hue), np.cos(hue),
-            L - ref_L, a - ref_a, b - ref_b]
+    output = [L, a, b, chroma, np.sin(hue), np.cos(hue),
+              L - ref_L, a - ref_a, b - ref_b]
+    if region == "flame":
+        # H2 benefits slightly from knowing the held-out run's own 0% flame
+        # colour in addition to its delta. RH overfits this domain cue, so its
+        # model deliberately remains delta-only.
+        base = [float(row.get(f"baseline_{region}_{channel}", 0)) for channel in "Lab"]
+        base_ref = [float(row.get(f"baseline_{reference}_{channel}", 0)) for channel in "Lab"]
+        output.extend([*base, *[value - ref for value, ref in zip(base, base_ref)]])
+    return output
 
 
 def candidates():
@@ -214,7 +222,7 @@ def evaluate(rows, config, estimator, name, protocol="video_holdout"):
             "mae": float(np.mean(np.abs(prediction[use] - y[use]))),
         })
     metric = {
-        "protocol": protocol,
+        "protocol": "calibration_aware_video_holdout" if protocol == "video_holdout" else protocol,
         "exact_accuracy": float(np.mean(prediction == y)),
         "within_one_step": float(np.mean(level_distance <= 1)),
         "mae": float(np.mean(np.abs(prediction - y))),
@@ -275,7 +283,7 @@ def plot(output, reports, paths):
         selected = reports[task]["selected"]
         display_levels = config["display_levels"]
         draw_confusion(axes[1, col], reports[task]["models"][selected]["confusion"], display_levels,
-                       f"{task}: video-held-out")
+                       f"{task}: calibration-aware video-held-out")
         draw_confusion(axes[2, col], reports[task]["within_run_models"][selected]["confusion"], display_levels,
                        f"{task}: within-run 5 s blocks")
     fig.suptitle("Limited-data single-frame concentration validation", weight="bold")
