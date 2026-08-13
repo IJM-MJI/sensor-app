@@ -169,6 +169,13 @@ def assign_h2_ramp_targets(rows):
         continuous = float(np.interp(float(row["time"]), seconds, values))
         row["continuous_target"] = continuous
         row["analysis_stage"] = float(np.clip(np.floor(continuous + .5), 0, 4))
+        time = float(row["time"])
+        if recovery_start is not None and time >= recovery_start:
+            row["analysis_phase"] = "recovery"
+        elif recovery_start is None and time >= H2_RAMP_ENDPOINTS[video][-1][0]:
+            row["analysis_phase"] = "hold"
+        else:
+            row["analysis_phase"] = "reaction"
 
 
 def assign_rh_ramp_targets(rows):
@@ -244,6 +251,9 @@ def candidates():
             max_iter=250, learning_rate=.04, max_leaf_nodes=15,
             min_samples_leaf=15, l2_regularization=3, random_state=42),
         "ridge_rounded": make_pipeline(StandardScaler(), Ridge(alpha=10.0)),
+        # Preserve the small calibrated colour offsets at H2 1--2%. Grouped
+        # validation, rather than this prior, decides whether it is selected.
+        "ridge_flexible_rounded": make_pipeline(StandardScaler(), Ridge(alpha=.03)),
         "extra_trees_regression_rounded": ExtraTreesRegressor(
             n_estimators=400, max_depth=9, min_samples_leaf=7, random_state=42, n_jobs=-1),
     }
@@ -379,6 +389,34 @@ def plot(output, reports, paths):
     plt.close(fig)
 
 
+def select_candidate(models, within_run_models):
+    """Select for sparse-stage generalisation without rewarding majority holds."""
+    return max(models, key=lambda name: (
+        np.sqrt(models[name]["stage_balanced_accuracy"]
+                * within_run_models[name]["stage_balanced_accuracy"]),
+        models[name]["stage_balanced_accuracy"],
+        models[name]["video_macro_within_one_step"],
+        -models[name]["video_macro_mae"],
+    ))
+
+
+def plot_h2_phases(output, phase_reports):
+    fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.5), constrained_layout=True)
+    for row, phase in enumerate(("reaction", "recovery")):
+        report = phase_reports[phase]
+        selected = report["selected"]
+        draw_confusion(
+            axes[row, 0], report["models"][selected]["confusion"],
+            TASKS["H2"]["display_levels"], f"H2 {phase}: video-held-out")
+        draw_confusion(
+            axes[row, 1], report["within_run_models"][selected]["confusion"],
+            TASKS["H2"]["display_levels"], f"H2 {phase}: within-run 5 s blocks")
+    fig.suptitle("H2 phase-specific concentration validation", weight="bold")
+    for suffix, kwargs in (("png", {"dpi": 500}), ("pdf", {}), ("svg", {})):
+        fig.savefig(output / f"h2_phase_validation.{suffix}", **kwargs)
+    plt.close(fig)
+
+
 def main():
     output = Path("training/output/ordinal_concentration")
     output.mkdir(parents=True, exist_ok=True)
@@ -400,13 +438,7 @@ def main():
                 task_rows, config, estimator, name, "within_run_blocks")
         # Sparse stages count equally. Select a model that works both on an unseen
         # recording and on held-out time blocks from a calibrated recording.
-        selected = max(models, key=lambda name: (
-            np.sqrt(models[name]["stage_balanced_accuracy"]
-                    * within_run_models[name]["stage_balanced_accuracy"]),
-            models[name]["stage_balanced_accuracy"],
-            models[name]["video_macro_within_one_step"],
-            -models[name]["video_macro_mae"],
-        ))
+        selected = select_candidate(models, within_run_models)
         reports[task] = {"selected": selected, "models": models,
                          "within_run_models": within_run_models,
                          "colour_path": paths[task], "predictions": predictions[selected],
@@ -415,10 +447,32 @@ def main():
                                  ("within_run_blocks", within_run_predictions[selected])):
             for row in source:
                 all_predictions.append({"task": task, "protocol": protocol, "model": selected, **row})
+    phase_reports = {}
+    h2_rows = [row for row in rows if row["kind"] == "h2_only" and "analysis_stage" in row]
+    for phase in ("reaction", "recovery"):
+        phase_rows = [row for row in h2_rows if row.get("analysis_phase") == phase]
+        models, predictions, within_models, within_predictions = {}, {}, {}, {}
+        for name, estimator in candidates().items():
+            models[name], predictions[name] = evaluate(
+                phase_rows, TASKS["H2"], estimator, name, "video_holdout")
+            within_models[name], within_predictions[name] = evaluate(
+                phase_rows, TASKS["H2"], estimator, name, "within_run_blocks")
+        selected = select_candidate(models, within_models)
+        phase_reports[phase] = {
+            "selected": selected, "n_frames": len(phase_rows),
+            "models": models, "within_run_models": within_models,
+        }
+        for protocol, source in ((f"{phase}_video_holdout", predictions[selected]),
+                                 (f"{phase}_within_run_blocks", within_predictions[selected])):
+            for row in source:
+                all_predictions.append({"task": "H2", "protocol": protocol,
+                                        "model": selected, **row})
+    reports["H2"]["phase_analysis"] = phase_reports
     (output / "metrics.json").write_text(json.dumps(reports, indent=2), encoding="utf-8")
     with (output / "predictions.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(all_predictions[0])); writer.writeheader(); writer.writerows(all_predictions)
     plot(output, reports, paths)
+    plot_h2_phases(output, phase_reports)
     print(json.dumps({task: {"selected": value["selected"],
                             "video_holdout": value["models"][value["selected"]],
                             "within_run_blocks": value["within_run_models"][value["selected"]],

@@ -63,6 +63,8 @@ H2-only 타임라인의 각 구간 끝은 해당 농도에 도달한 시점입�
 
 RH는 20%와 30%를 하나의 `20–30%` 구간으로 합치고 40–90%는 10% 단위로 유지합니다. 모든 video-held-out 평가는 테스트 영상의 0% calibration만 허용하고 그 영상의 나머지 프레임 전체를 학습에서 제외하는 `calibration-aware video-held-out`입니다. H2는 자기 초기 불꽃색과 그 대비 변화량을 사용하며 정확도 36.8%(stage-balanced 36.9%, ±1% 이내 61.5%)입니다. 동일 run의 다른 5초 블록에서는 정확도 63.0%(stage-balanced 51.9%, ±1% 이내 91.9%)입니다. 연속 0--4% Ridge 회귀의 calibration-aware 독립 영상 평균 MAE는 0.69%p입니다. RH를 endpoint ramp로 바로잡은 뒤 calibration-aware 정확도는 38.2%(stage-balanced 36.5%, MAE 11.91%p), 동일 run 5초 블록은 정확도 53.3%(stage-balanced 53.2%, MAE 6.00%p)입니다. 전체 범위 숫자는 앱에서 별도 검증한 뒤 배포합니다.
 
+H2의 긴 4% hold가 전체 점수를 부풀리는지 확인하기 위해 Reaction과 Recovery를 별도로 평가합니다. Reaction 전용 calibration-aware 모델은 정확도 39.6%, stage-balanced 42.9%, ±1% 이내 84.6%, MAE 0.76%p이며, 동일 run 5초 블록은 정확도 49.3%, MAE 0.55%p입니다. Recovery는 독립 run이 두 개뿐이고 held-out 정확도 24.9%, MAE 1.48%p라서 정량 모델에 합치지 않습니다. 단일 사진 앱에는 검증된 Reaction 모델만 후보로 두고, Recovery는 별도 상태 또는 불확실 결과로 취급합니다.
+
 Calibration 프레임에서 불꽃/물방울 픽셀을 완전히 고정하는 방식도 별도로 시험했습니다. RH 70--90% 회귀 오차는 4.97%p로 감소했지만 4상태 balanced accuracy가 70.1%에서 60.1%로 낮아지고 전체 농도 단계 오차가 증가해 채택하지 않았습니다. 다음 추출기는 원 위치를 유지하되 촬영 중의 미세 회전·이동을 먼저 정합한 뒤 고정 마스크를 적용해야 합니다.
 
 ## 주의 사항
@@ -90,5 +92,5 @@ python -m venv .venv
 
 정량 모델 후보와 영상 단위 오차는 `training/quantitative_analysis.py`로 비교합니다. 논문용 검증 Figure는 `training/output/quantitative/quantitative_validation`의 PNG(600 dpi), PDF, SVG로 생성되며, 동일 Figure의 점과 전체 예측값을 CSV로 함께 저장합니다.
 
-전체 단계별 색 궤적과 confusion matrix는 `training/output/ordinal_concentration/ordinal_concentration_validation`의 PNG(500 dpi), PDF, SVG로 생성되고 프레임별 예측은 같은 폴더의 `predictions.csv`에 저장됩니다.
+전체 단계별 색 궤적과 confusion matrix는 `training/output/ordinal_concentration/ordinal_concentration_validation`, H2 phase별 결과는 `h2_phase_validation`의 PNG(500 dpi), PDF, SVG로 생성되고 프레임별 예측은 같은 폴더의 `predictions.csv`에 저장됩니다.
 H2 0/1/2%의 명목 단계 마지막 프레임을 같은 크기로 정렬한 판독용 montage는 `training/make_h2_low_stage_montage.py`로 생성합니다.
