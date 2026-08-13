@@ -339,7 +339,116 @@ def split_lower_by_y(ys: np.ndarray, iterations: int = 12) -> np.ndarray:
     return np.abs(ys - c1) < np.abs(ys - c0)
 
 
-def patch_balance_lab(lab: np.ndarray, chamber_mask: np.ndarray) -> np.ndarray:
+def normalized_coordinates(shape, circle, orientation_quarters=0):
+    """Return chamber coordinates after placing the flame above the droplet."""
+    x, y, r = circle
+    yy, xx = np.ogrid[:shape[0], :shape[1]]
+    nx = (xx - x) / max(r, 1)
+    ny = (yy - y) / max(r, 1)
+    for _ in range(orientation_quarters % 4):
+        nx, ny = ny, -nx
+    return nx, ny
+
+
+def reference_patch_measurements(
+    lab: np.ndarray,
+    chamber_mask: np.ndarray,
+    nx: np.ndarray,
+    ny: np.ndarray,
+) -> tuple[dict[str, np.ndarray], dict[str, object]]:
+    """Measure the two printed neutral rectangles in semantic sample space.
+
+    After orientation normalisation the rectangles occupy the upper-right and
+    lower-left corners around the flame/droplet pair. Tight cores avoid chamber
+    metal and most substrate pixels; a neutral-colour test rejects sensor ink.
+    """
+    chroma = np.hypot(lab[:, :, 1].astype(float) - 128,
+                      lab[:, :, 2].astype(float) - 128)
+    cores = {
+        "upper_right": chamber_mask & (nx >= .16) & (nx <= .54) & (ny >= -.70) & (ny <= -.30),
+        "lower_left": chamber_mask & (nx >= -.70) & (nx <= -.30) & (ny >= .28) & (ny <= .66),
+    }
+    masks: dict[str, np.ndarray] = {}
+    medians: dict[str, np.ndarray] = {}
+    for name, core in cores.items():
+        neutral = core & (chroma <= 15)
+        if int(neutral.sum()) < 20:
+            neutral = core
+        masks[name] = neutral
+        medians[name] = np.median(lab[neutral].astype(float), axis=0)
+    ordered = sorted(medians, key=lambda name: medians[name][0])
+    gray_name, white_name = ordered[0], ordered[-1]
+    brightness_gap = float(medians[white_name][0] - medians[gray_name][0])
+    reliable = bool(all(int(mask.sum()) >= 20 for mask in masks.values()) and brightness_gap >= 7)
+    return masks, {
+        "gray_name": gray_name, "white_name": white_name,
+        "gray_lab": medians[gray_name], "white_lab": medians[white_name],
+        "brightness_gap": brightness_gap, "reliable": reliable,
+    }
+
+
+def register_coordinates_from_patches(
+    lab: np.ndarray,
+    chamber_mask: np.ndarray,
+    nx: np.ndarray,
+    ny: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float]]:
+    """Refine translation/rotation/scale from the two neutral patch centres."""
+    chroma = np.hypot(lab[:, :, 1].astype(float) - 128,
+                      lab[:, :, 2].astype(float) - 128)
+    searches = [
+        ((nx >= .08) & (nx <= .68) & (ny >= -.78) & (ny <= -.20), np.array([.35, -.50])),
+        ((nx >= -.78) & (nx <= -.20) & (ny >= .18) & (ny <= .74), np.array([-.50, .47])),
+    ]
+    observed = []
+    targets = []
+    for zone, target in searches:
+        select = chamber_mask & zone & (chroma <= 15)
+        if int(select.sum()) < 30:
+            return nx, ny, {"reliable": 0.0}
+        lightness = lab[:, :, 0].astype(float)[select]
+        cutoff = float(np.percentile(lightness, 60))
+        ys, xs = np.where(select & (lab[:, :, 0] >= cutoff))
+        if len(xs) < 12:
+            return nx, ny, {"reliable": 0.0}
+        weights = np.maximum(lab[ys, xs, 0].astype(float) - np.percentile(lightness, 20), 1) ** 2
+        observed.append(np.array([
+            np.average(np.broadcast_to(nx, lab.shape[:2])[ys, xs], weights=weights),
+            np.average(np.broadcast_to(ny, lab.shape[:2])[ys, xs], weights=weights),
+        ]))
+        targets.append(target)
+    observed = np.asarray(observed); targets = np.asarray(targets)
+    observed_vector = observed[0] - observed[1]
+    target_vector = targets[0] - targets[1]
+    observed_length = float(np.linalg.norm(observed_vector))
+    target_length = float(np.linalg.norm(target_vector))
+    if observed_length < .55 or observed_length > 1.65:
+        return nx, ny, {"reliable": 0.0}
+    scale = target_length / observed_length
+    angle = float(np.arctan2(target_vector[1], target_vector[0])
+                  - np.arctan2(observed_vector[1], observed_vector[0]))
+    observed_midpoint = observed.mean(axis=0); target_midpoint = targets.mean(axis=0)
+    translation = target_midpoint - observed_midpoint
+    if not (.85 <= scale <= 1.15 and abs(angle) <= np.deg2rad(12)
+            and np.linalg.norm(translation) <= .16):
+        return nx, ny, {"reliable": 0.0, "scale": scale, "angle_degrees": np.degrees(angle)}
+    cosine, sine = np.cos(angle), np.sin(angle)
+    dx, dy = nx - observed_midpoint[0], ny - observed_midpoint[1]
+    registered_x = target_midpoint[0] + scale * (cosine * dx - sine * dy)
+    registered_y = target_midpoint[1] + scale * (sine * dx + cosine * dy)
+    return registered_x, registered_y, {
+        "reliable": 1.0, "scale": float(scale),
+        "angle_degrees": float(np.degrees(angle)),
+        "translation": float(np.linalg.norm(translation)),
+    }
+
+
+def patch_balance_lab(
+    lab: np.ndarray,
+    chamber_mask: np.ndarray,
+    nx: np.ndarray | None = None,
+    ny: np.ndarray | None = None,
+) -> np.ndarray:
     """Neutralise a/b using the white/gray pieces printed beside the shapes.
 
     The original research pipeline explicitly detects the rectangular pieces.
@@ -348,6 +457,21 @@ def patch_balance_lab(lab: np.ndarray, chamber_mask: np.ndarray) -> np.ndarray:
     while the white/gray pieces and substrate vote for the illumination offset.
     """
     out = lab.astype(np.float64)
+    if nx is not None and ny is not None:
+        _, info = reference_patch_measurements(lab, chamber_mask, nx, ny)
+        gray = np.asarray(info["gray_lab"], dtype=float)
+        white = np.asarray(info["white_lab"], dtype=float)
+        # Both printed references are neutral. Their mean gives a more specific
+        # WB estimate than every neutral chamber/substrate pixel. A full L*
+        # two-point stretch over-compressed the 4% flame whenever the observed
+        # gray/white gap was small, so exposure uses the white reference only.
+        da = float((gray[1] + white[1]) / 2 - 128)
+        db = float((gray[2] + white[2]) / 2 - 128)
+        scale = float(np.clip(210.0 / max(white[0], 1), .80, 1.5))
+        out[:, :, 0] = np.clip(out[:, :, 0] * scale, 0, 255)
+        out[:, :, 1] = np.clip(out[:, :, 1] - da, 0, 255)
+        out[:, :, 2] = np.clip(out[:, :, 2] - db, 0, 255)
+        return out
     chroma = np.sqrt((out[:, :, 1] - 128) ** 2 + (out[:, :, 2] - 128) ** 2)
     neutral = chamber_mask & (chroma < 8) & (out[:, :, 0] > 140)
     if int(neutral.sum()) < 50:
@@ -471,6 +595,10 @@ def extract_features(
     inner = round(r * 0.90)
     yy, xx = np.ogrid[:raw_lab.shape[0], :raw_lab.shape[1]]
     mask = (xx - x) ** 2 + (yy - y) ** 2 <= inner ** 2
+    nx, ny = normalized_coordinates(raw_lab.shape, circle, orientation_quarters)
+    # Explicit patch-colour forcing and patch-centroid registration are audit
+    # candidates only: both reduced video-held-out generalisation. Retain the
+    # validated chamber-neutral balance and circle/quarter-turn geometry.
     lab = patch_balance_lab(raw_lab, mask)
     px = lab[mask].astype(np.float64)
     if len(px) < 100:
@@ -482,12 +610,8 @@ def extract_features(
     # Fixed shape zones prevent the gray/white calibration pieces from becoming
     # sensor features. Distance from the local substrate also retains the gray
     # dry droplet, which a chroma-only mask would discard.
-    nx = (xx - x) / max(r, 1)
-    ny = (yy - y) / max(r, 1)
-    # Normalize in-plane sample rotation before applying the semantic shape
-    # zones. A +1 quarter-turn rotates the observed right-side flame to the top.
-    for _ in range(orientation_quarters % 4):
-        nx, ny = ny, -nx
+    # Coordinates were normalized before patch balancing so both the reference
+    # rectangles and sensing-shape masks share exactly the same geometry.
     central_x = (nx >= -.55) & (nx <= .35)
     flame_zone = mask & central_x & (ny >= -.62) & (ny <= -.02)
     drop_zone = mask & central_x & (ny >= .02) & (ny <= .68)
