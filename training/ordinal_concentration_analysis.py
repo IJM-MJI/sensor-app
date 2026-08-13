@@ -47,6 +47,26 @@ H2_RAMP_ENDPOINTS = {
 }
 H2_RECOVERY_START = {"1_90_H2_only_4.mp4": 122.0, "1_90_H2_only_5.mp4": 130.0}
 
+# RH-only timelines also describe concentrations reached at interval ends. The
+# first listed value is the starting RH; later endpoints are interpolated. The
+# extra clip resumes the long recording while it is rising from RH60.
+RH_RAMP_ENDPOINTS = {
+    "1_90_H2O_only_2_extract.mp4": [(3, 20), (6, 20), (9, 30), (15, 40),
+                                             (25, 50), (35, 60), (45, 70),
+                                             (72, 80), (140, 90)],
+    "1_90_H2O_only.MOV": [(0, 90), (8, 90), (11, 80), (13, 70), (15, 60),
+                                    (20, 50), (23, 40), (30, 30), (39, 20)],
+    "1_90_H2O_only_extract_3min.mp4": [(0, 20), (14, 20), (25, 30), (45, 40),
+                                                (90, 50), (120, 60), (189, 70)],
+    "1_90_H2O_only_extract_extra.mp4": [(0, 60 + 60 / 69 * 10), (9, 70), (87, 80)],
+    "1_90_H2O_only_6(response).mp4": [(0, 20), (7, 20), (10, 30), (13, 40),
+                                               (14, 50), (16, 60), (18, 70),
+                                               (20, 80), (32, 90)],
+    "1_90_H2O_only_3(response).mp4": [(0, 20), (2, 20), (3, 30), (5, 40),
+                                               (7, 50), (11, 60), (25, 70),
+                                               (28, 80), (38, 90)],
+}
+
 
 class OrdinalLogistic(BaseEstimator, ClassifierMixin):
     """Learn P(level >= threshold) so neighbouring stages remain ordered."""
@@ -82,9 +102,54 @@ class OrdinalLogistic(BaseEstimator, ClassifierMixin):
         return self.classes_[np.argmax(self.predict_proba(x), axis=1)]
 
 
+class ResponseThenStage(BaseEstimator, ClassifierMixin):
+    """Separate the calibrated baseline boundary from positive concentration."""
+
+    def __init__(self, response_threshold=.42, n_estimators=400, max_depth=9,
+                 min_samples_leaf=7):
+        self.response_threshold = response_threshold
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.min_samples_leaf = min_samples_leaf
+
+    def _forest(self):
+        return ExtraTreesClassifier(
+            n_estimators=self.n_estimators, max_depth=self.max_depth,
+            min_samples_leaf=self.min_samples_leaf, class_weight="balanced",
+            random_state=42, n_jobs=-1)
+
+    def fit(self, x, y):
+        self.classes_ = np.asarray(sorted(set(y)), dtype=float)
+        self.baseline_ = self.classes_[0]
+        response = np.asarray(y) != self.baseline_
+        self.gate_ = self._forest().fit(x, response)
+        self.stage_ = self._forest().fit(np.asarray(x)[response], np.asarray(y)[response])
+        return self
+
+    def predict_proba(self, x):
+        response_probability = self.gate_.predict_proba(x)[:, list(self.gate_.classes_).index(True)]
+        stage_probability = self.stage_.predict_proba(x)
+        output = np.zeros((len(x), len(self.classes_)))
+        output[:, 0] = 1 - response_probability
+        for source, level in enumerate(self.stage_.classes_):
+            target = int(np.where(self.classes_ == level)[0][0])
+            output[:, target] = response_probability * stage_probability[:, source]
+        return output
+
+    def predict(self, x):
+        response_probability = self.gate_.predict_proba(x)[:, list(self.gate_.classes_).index(True)]
+        output = np.full(len(x), self.baseline_)
+        use = response_probability >= self.response_threshold
+        if np.any(use):
+            output[use] = self.stage_.predict(np.asarray(x)[use])
+        return output
+
+
 def target_value(row, config):
     if config["label"] == "h2_value" and "analysis_stage" in row:
         return float(row["analysis_stage"])
+    if config["label"] == "rh_value" and "rh_analysis_stage" in row:
+        return float(row["rh_analysis_stage"])
     value = float(row[config["label"]])
     return 25.0 if config["label"] == "rh_value" and value <= 30 else value
 
@@ -104,6 +169,26 @@ def assign_h2_ramp_targets(rows):
         continuous = float(np.interp(float(row["time"]), seconds, values))
         row["continuous_target"] = continuous
         row["analysis_stage"] = float(np.clip(np.floor(continuous + .5), 0, 4))
+
+
+def assign_rh_ramp_targets(rows):
+    """Replace the old plateau labels with endpoint-interpolated RH targets."""
+    levels = np.asarray(TASKS["RH"]["levels"], dtype=float)
+    for row in rows:
+        points = RH_RAMP_ENDPOINTS.get(str(row["video"]))
+        if not points:
+            continue
+        seconds, values = zip(*points)
+        t = float(row["time"])
+        if t < seconds[0] or t > seconds[-1]:
+            row["rh_value"] = None
+            row.pop("rh_analysis_stage", None)
+            continue
+        continuous = float(np.interp(t, seconds, values))
+        row["rh_value"] = continuous
+        # 20 and 30 are intentionally one output class; 40--90 retain 10% RH
+        # resolution. Nearest-stage rounding mirrors the H2 ramp evaluation.
+        row["rh_analysis_stage"] = float(levels[np.argmin(np.abs(levels - continuous))])
 
 
 def add_stability(rows):
@@ -148,6 +233,7 @@ def augment(row, region):
 
 def candidates():
     return {
+        "response_then_stage": ResponseThenStage(response_threshold=.42),
         "ordinal_logistic": OrdinalLogistic(C=.5),
         "multinomial_logistic": make_pipeline(StandardScaler(), LogisticRegression(
             C=.5, max_iter=3000, class_weight="balanced", random_state=42)),
@@ -207,8 +293,9 @@ def evaluate(rows, config, estimator, name, protocol="video_holdout"):
         else:
             probability = fitted.predict_proba(x[test])
             classes = np.asarray(fitted.classes_, dtype=float)
-            best = np.argmax(probability, axis=1)
-            prediction[test] = classes[best]
+            direct = np.asarray(fitted.predict(x[test]), dtype=float)
+            best = np.asarray([int(np.where(classes == value)[0][0]) for value in direct])
+            prediction[test] = direct
             confidence[test] = probability[np.arange(len(best)), best]
     step = float(np.median(np.diff(levels)))
     level_distance = np.abs(prediction - y) / step
@@ -298,12 +385,11 @@ def main():
     rows = read_csv(Path("training/cache") / CACHE_VERSION / "features.csv")
     add_stability(rows)
     assign_h2_ramp_targets(rows)
+    assign_rh_ramp_targets(rows)
     reports, paths, all_predictions = {}, {}, []
     for task, config in TASKS.items():
         task_rows = [row for row in rows if row["kind"] == config["kind"]
-                     and row.get(config["label"]) is not None
-                     and (task == "H2" or
-                          float(row[config["label"] + "_stable_seconds"]) >= MIN_STABLE_SECONDS)]
+                     and row.get(config["label"]) is not None]
         if task == "H2":
             task_rows = [row for row in task_rows if "analysis_stage" in row]
         paths[task] = colour_path(task_rows, config)

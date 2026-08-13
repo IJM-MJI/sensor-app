@@ -141,6 +141,12 @@ the quantitative analysis uses the interpolated 0--4% targets.
 
 ## H2O-only humidity references
 
+All ranges below are **ramp endpoints**, not concentration plateaus. The RH at
+the end of an interval is the value reached at that time. The first listed RH is
+the run's starting condition; subsequent endpoints are interpolated during
+quantitative training. For reporting, 20--30% is one class while 40--90% keeps
+10%-RH resolution.
+
 | Video | Lighting | Timeline |
 |---|---|---|
 | `1_90_H2O_only_2_extract.mp4` | Indoor | 20% 3-6 s; 30% 6-9 s; 40% 9-15 s; 50% 15-25 s; 60% 25-35 s; 70% 35-45 s; 80% 45-72 s; 90% 72-140 s |

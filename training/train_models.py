@@ -68,6 +68,9 @@ class Clip:
     duration_hint: float | None = None
     rh: float | None = None
     segments: tuple[tuple[float, float, float], ...] = ()
+    # RH segments are ramp endpoints. Usually the first listed RH is also the
+    # starting condition; split clips may override it with the preceding RH.
+    rh_initial: float | None = None
     h2_segments: tuple[tuple[float, float, float], ...] = ()
     orientation_quarters: int = 0
     fixed_circle: tuple[int, int, int] | None = None
@@ -134,7 +137,7 @@ def manifest() -> list[Clip]:
     )
     rh_long_a = (
         (0, 14, 20), (14, 25, 30), (25, 45, 40), (45, 90, 50),
-        (90, 120, 60), (120, 180, 70),
+        (90, 120, 60), (120, 189, 70),
     )
     rh_long_b = ((0, 9, 70), (9, 87, 80))
     rh_daylight_recovery = (
@@ -174,6 +177,8 @@ def manifest() -> list[Clip]:
         Clip("1_90_H2O_only_extract_3min.mp4", "rh_only", "rh-indoor-long", segments=rh_long_a,
              minimum_sample_hz=2.0, cache_tag="quant-2hz-v1"),
         Clip("1_90_H2O_only_extract_extra.mp4", "rh_only", "rh-indoor-long", segments=rh_long_b,
+             # This extract begins at source t=180 s, nine seconds before RH70.
+             rh_initial=60.0 + (180.0 - 120.0) / (189.0 - 120.0) * 10.0,
              minimum_sample_hz=2.0, cache_tag="quant-2hz-v1"),
         Clip("1_90_H2O_only_6(response).mp4", "rh_only", "rh-response-6",
              segments=rh_response_6, orientation_quarters=1, fixed_circle=(164, 274, 61),
@@ -487,9 +492,13 @@ def stable_segment_value(segments: Iterable[tuple[float, float, float]], t: floa
     return None
 
 
-def ramp_segment_value(segments: Iterable[tuple[float, float, float]], t: float) -> float | None:
+def ramp_segment_value(
+    segments: Iterable[tuple[float, float, float]],
+    t: float,
+    initial_value: float = 0.0,
+) -> float | None:
     """Interpolate between concentrations reached at successive interval ends."""
-    previous = 0.0
+    previous = float(initial_value)
     for start, end, target in segments:
         if start <= t <= end:
             fraction = np.clip((t - start) / max(end - start, 1e-9), 0, 1)
@@ -508,7 +517,12 @@ def labels_for(clip: Clip, t: float, duration: float) -> tuple[int | None, int |
     rh_high: int | None = None
     state: str | None = None
     h2_value = ramp_segment_value(clip.h2_segments, t)
-    rh_value = stable_segment_value(clip.segments, t)
+    rh_start = clip.rh_initial
+    if rh_start is None and clip.segments:
+        # An RH-only run begins at its first stated chamber RH. Every following
+        # interval end is the time that the next target RH is reached.
+        rh_start = float(clip.segments[0][2])
+    rh_value = ramp_segment_value(clip.segments, t, rh_start or 0.0)
     if clip.kind == "h2_only":
         rh_high = None
         if h2_value is not None:
