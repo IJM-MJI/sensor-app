@@ -57,6 +57,12 @@ H2 ramp 타임라인은 명목 농도로 보존합니다. H2-only 영상은 제�
 
 최신 정량 검증은 4,373개 특징 프레임을 사용합니다. 단독 조건은 2 Hz, 짧은 response 영상은 4 Hz로 추출했고 상태 정확도는 일반 영상을 4초 간격으로 다시 샘플링해 실험별 가중치를 유지합니다. 앱의 정적 Ridge 정량 범위는 H2 3--4%(LOVO MAE 0.44%p), H2O-only RH 70--90%(LOVO MAE 8.04%p)입니다. 5초 시간 모델은 RH 70--90%에서 MAE 4.89%p를 보였지만 앱에 아직 배포하지 않았습니다. 전체 범위는 농도별 오차가 불균형하여 범위 밖 숫자를 표시하지 않습니다.
 
+### 전체 농도 단계 검증
+
+`training/ordinal_concentration_analysis.py`는 H2-only의 불꽃과 H2O-only의 물방울만 사용해 농도 증가에 따른 보정 LAB 색 궤적을 비교합니다. 각 검증 fold에서 영상 하나를 통째로 제외합니다. 현재 전체 단계 결과는 H2 0--4%의 영상별 평균 정확도 60.5%, MAE 0.76%p이고, RH 20--90%는 영상별 평균 정확도 51.5%, MAE 10.13%p입니다. 촬영 run별 편차가 커서 이 결과를 전체 범위 숫자로 앱에 배포하지 않았습니다.
+
+Calibration 프레임에서 불꽃/물방울 픽셀을 완전히 고정하는 방식도 별도로 시험했습니다. RH 70--90% 회귀 오차는 4.97%p로 감소했지만 4상태 balanced accuracy가 70.1%에서 60.1%로 낮아지고 전체 농도 단계 오차가 증가해 채택하지 않았습니다. 다음 추출기는 원 위치를 유지하되 촬영 중의 미세 회전·이동을 먼저 정합한 뒤 고정 마스크를 적용해야 합니다.
+
 ## 주의 사항
 
 이 앱은 연구용 프로토타입이며 안전 경보기나 정량 계측기가 아닙니다. 특히 H2 감지는 제한된 단일 센서·촬영 환경에서 학습되어 다른 센서, 조명, 카메라에는 일반화가 검증되지 않았습니다. 수소 안전 판단에는 반드시 인증된 전용 검지기를 사용하세요.
@@ -74,9 +80,12 @@ python -m venv .venv
   --video-root "C:\path\to\recordings\1"
 .venv\Scripts\python training\state_condition_analysis.py
 .venv\Scripts\python training\quantitative_analysis.py
+.venv\Scripts\python training\ordinal_concentration_analysis.py
 .venv\Scripts\python training\simultaneous_interference_analysis.py
 ```
 
 지연 상세와 신뢰 여부는 `training/output/h2_lag_report.json`에 저장됩니다. 학습 산출물은 `training/output/metrics.json`, `training/output/models.json`, `sensor-model.js`, `sensor-state-model.js`에 저장됩니다. 영상과 캐시는 용량 때문에 저장소에서 제외합니다.
 
 정량 모델 후보와 영상 단위 오차는 `training/quantitative_analysis.py`로 비교합니다. 논문용 검증 Figure는 `training/output/quantitative/quantitative_validation`의 PNG(600 dpi), PDF, SVG로 생성되며, 동일 Figure의 점과 전체 예측값을 CSV로 함께 저장합니다.
+
+전체 단계별 색 궤적과 confusion matrix는 `training/output/ordinal_concentration/ordinal_concentration_validation`의 PNG(500 dpi), PDF, SVG로 생성되고 프레임별 예측은 같은 폴더의 `predictions.csv`에 저장됩니다.

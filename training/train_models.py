@@ -641,6 +641,9 @@ def apply_shared_baselines(rows: list[dict[str, object]]) -> list[dict[str, obje
         out = dict(row)
         baseline = baselines[str(row["video"])]
         for name in FEATURE_NAMES:
+            # Keep the calibrated initial colour available for concentration
+            # experiments; deployed classifiers still use the baseline delta.
+            out[f"baseline_{name}"] = baseline[name]
             out[name] = float(row[name]) - baseline[name]
         normalized.append(out)
     return normalized
