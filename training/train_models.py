@@ -40,6 +40,15 @@ FEATURE_NAMES = [
     "drop_L", "drop_a", "drop_b",
     "top_L", "top_a", "top_b",
 ]
+SHAPE_STAT_FEATURES = [
+    *[f"{region}_{channel}_{stat}"
+      for region in ("flame", "drop")
+      for channel in ("L", "a", "b", "chroma")
+      for stat in ("p10", "p25", "p50", "p75", "p90", "std")],
+    *[f"{region}_{name}_fraction"
+      for region in ("flame", "drop")
+      for name in ("green", "warm", "purple")],
+]
 MODEL_FEATURES = [
     "flame_a", "flame_b", "drop_a", "drop_b", "top_a", "top_b",
 ]
@@ -161,15 +170,15 @@ def manifest() -> list[Clip]:
     h2_daylight_5 = ((0, 5, 0), (5, 8, 1), (8, 13, 2), (13, 21, 3), (21, 130, 4), (130, 272, 0))
     clips = [
         Clip("1_90_H2_only_test.mp4", "h2_only", "h2-test-indoor", h2_segments=h2_test,
-             minimum_sample_hz=2.0, cache_tag="quant-2hz-v1"),
+             minimum_sample_hz=2.0, cache_tag="quant-2hz-v2-distribution"),
         Clip("1_90_H2_only_test_2.mp4", "h2_only", "h2-test-2", h2_segments=h2_test_2,
-             minimum_sample_hz=2.0, cache_tag="quant-2hz-v1"),
+             minimum_sample_hz=2.0, cache_tag="quant-2hz-v2-distribution"),
         Clip("1_90_H2_only_test_3.MOV", "h2_only", "h2-test-3", h2_segments=h2_test_3,
-             minimum_sample_hz=2.0, cache_tag="quant-2hz-v1"),
+             minimum_sample_hz=2.0, cache_tag="quant-2hz-v2-distribution"),
         Clip("1_90_H2_only_4.mp4", "h2_only", "h2-indoor-4", h2_segments=h2_indoor_4,
-             minimum_sample_hz=2.0, cache_tag="quant-2hz-v1"),
+             minimum_sample_hz=2.0, cache_tag="quant-2hz-v2-distribution"),
         Clip("1_90_H2_only_5.mp4", "h2_only", "h2-daylight-5", h2_segments=h2_daylight_5,
-             minimum_sample_hz=2.0, cache_tag="quant-2hz-v1"),
+             minimum_sample_hz=2.0, cache_tag="quant-2hz-v2-distribution"),
         Clip("1_90_H2O_only_2_extract.mp4", "rh_only", "rh-indoor-fast", segments=rh_fast,
              minimum_sample_hz=2.0, cache_tag="quant-2hz-v1"),
         Clip("1_90_H2O_only.MOV", "rh_only", "rh-daylight-recovery", segments=rh_daylight_recovery,
@@ -419,10 +428,10 @@ def lock_orientation(
     return chosen, float(votes[chosen] / votes.sum())
 
 
-def masked_shape_mean(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) -> np.ndarray:
+def masked_shape_pixels(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) -> np.ndarray:
     pixels = lab[zone]
     if len(pixels) < 20:
-        return background
+        return np.repeat(background[None, :], 20, axis=0)
     distance = np.sqrt(
         (.35 * (pixels[:, 0] - background[0])) ** 2
         + (pixels[:, 1] - background[1]) ** 2
@@ -432,7 +441,23 @@ def masked_shape_mean(lab: np.ndarray, zone: np.ndarray, background: np.ndarray)
     shape = pixels[distance >= cutoff]
     if len(shape) < 12:
         shape = pixels[np.argsort(distance)[-max(12, len(pixels) // 5):]]
-    return np.mean(shape, axis=0)
+    return shape
+
+
+def shape_summary(shape: np.ndarray, prefix: str) -> tuple[np.ndarray, dict[str, float]]:
+    """Return the legacy mean plus distribution features from one shape mask."""
+    mean = np.mean(shape, axis=0)
+    chroma = np.hypot(shape[:, 1] - 128, shape[:, 2] - 128)
+    values = {"L": shape[:, 0], "a": shape[:, 1], "b": shape[:, 2], "chroma": chroma}
+    output: dict[str, float] = {}
+    for channel, samples in values.items():
+        for percentile in (10, 25, 50, 75, 90):
+            output[f"{prefix}_{channel}_p{percentile}"] = float(np.percentile(samples, percentile))
+        output[f"{prefix}_{channel}_std"] = float(np.std(samples))
+    output[f"{prefix}_green_fraction"] = float(np.mean(shape[:, 1] <= 124))
+    output[f"{prefix}_warm_fraction"] = float(np.mean(shape[:, 2] >= 132))
+    output[f"{prefix}_purple_fraction"] = float(np.mean((shape[:, 1] >= 130) & (shape[:, 2] <= 128)))
+    return mean, output
 
 
 def extract_features(
@@ -466,13 +491,14 @@ def extract_features(
     central_x = (nx >= -.55) & (nx <= .35)
     flame_zone = mask & central_x & (ny >= -.62) & (ny <= -.02)
     drop_zone = mask & central_x & (ny >= .02) & (ny <= .68)
-    flame = masked_shape_mean(lab, flame_zone, bg)
-    drop = masked_shape_mean(lab, drop_zone, bg)
+    flame, flame_stats = shape_summary(masked_shape_pixels(lab, flame_zone, bg), "flame")
+    drop, drop_stats = shape_summary(masked_shape_pixels(lab, drop_zone, bg), "drop")
     return {
         "flame_L": flame[0], "flame_a": flame[1], "flame_b": flame[2],
         "drop_L": drop[0], "drop_a": drop[1], "drop_b": drop[2],
         "bg_L": bg[0], "bg_a": bg[1], "bg_b": bg[2],
         "top_L": top[0], "top_a": top[1], "top_b": top[2],
+        **flame_stats, **drop_stats,
     }
 
 
@@ -625,6 +651,8 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
         }
         for name in FEATURE_NAMES:
             row[name] = corr[name]
+        for name in SHAPE_STAT_FEATURES:
+            row[name] = feat[name]
         rows.append(row)
     median_circle = tuple(int(v) for v in np.median(np.asarray(detected_circles), axis=0))
     print(
@@ -652,21 +680,28 @@ def apply_shared_baselines(rows: list[dict[str, object]]) -> list[dict[str, obje
             # calibration available to the browser for an otherwise held-out run.
             candidates = [r for r in video_rows if float(r["time"]) <= 2.5]
         elif kind == "rh_only":
-            candidates = [r for r in video_rows if r["rh_value"] == 20]
+            # A sampled recovery clip may stop just before the exact endpoint;
+            # accept the final frame when its interpolated target is within 1%RH.
+            candidates = [r for r in video_rows
+                          if r["rh_value"] is not None and float(r["rh_value"]) <= 21]
         else:
             candidates = [r for r in video_rows if r["state"] == "baseline_recovery"]
         if len(candidates) < 1:
             raise RuntimeError(f"No trustworthy baseline for {video}")
+        available_features = [
+            name for name in (*FEATURE_NAMES, *SHAPE_STAT_FEATURES)
+            if name in video_rows[0]
+        ]
         baselines[video] = {
             name: float(np.median([float(r[name]) for r in candidates]))
-            for name in FEATURE_NAMES
+            for name in available_features
         }
 
     normalized: list[dict[str, object]] = []
     for row in rows:
         out = dict(row)
         baseline = baselines[str(row["video"])]
-        for name in FEATURE_NAMES:
+        for name in baseline:
             # Keep the calibrated initial colour available for concentration
             # experiments; deployed classifiers still use the baseline delta.
             out[f"baseline_{name}"] = baseline[name]
@@ -899,6 +934,10 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("training/output"))
     parser.add_argument("--cache", type=Path, default=Path(f"training/cache/{CACHE_VERSION}/features.csv"))
     parser.add_argument("--reuse-cache", action="store_true")
+    parser.add_argument(
+        "--features-only", action="store_true",
+        help="refresh the calibrated feature cache without replacing deployed models",
+    )
     nominal_legacy = Path(f"training/cache/{CACHE_VERSION}/legacy_continuous.csv")
     lag_corrected_legacy = Path(f"training/cache/{CACHE_VERSION}/legacy_continuous_lag_corrected.csv")
     parser.add_argument(
@@ -928,6 +967,10 @@ def main() -> None:
             rows.extend(clip_rows)
         rows = apply_shared_baselines(rows)
         write_csv(args.cache, rows)
+
+    if args.features_only:
+        print(f"wrote calibrated feature cache: {args.cache} ({len(rows)} rows)")
+        return
 
     new_rows = rows
     legacy_rows = read_legacy_continuous(args.legacy_cache)

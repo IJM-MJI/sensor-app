@@ -235,6 +235,13 @@ def augment(row, region):
         base = [float(row.get(f"baseline_{region}_{channel}", 0)) for channel in "Lab"]
         base_ref = [float(row.get(f"baseline_{reference}_{channel}", 0)) for channel in "Lab"]
         output.extend([*base, *[value - ref for value, ref in zip(base, base_ref)]])
+        # Chroma percentiles capture the fraction of the flame that recolours at
+        # H2 1--2%. Adding every histogram statistic overfit recording texture in
+        # video-held-out tests, so only this independently useful compact subset
+        # is exposed to the concentration model.
+        chroma_suffixes = [f"chroma_p{percentile}" for percentile in (10, 25, 50, 75, 90)]
+        if all(f"flame_{suffix}" in row for suffix in chroma_suffixes):
+            output.extend(float(row[f"flame_{suffix}"]) for suffix in chroma_suffixes)
     return output
 
 
