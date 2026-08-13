@@ -41,15 +41,17 @@ H2 또는 RH 확률이 판정 임계값의 ±0.10 안에 있으면 앱은 상태
 | H2 반응 감지 | 81.2% | 0.902 | 방향 정렬된 불꽃, simultaneous RH90 포화 구간 제외 |
 | RH 70% 이상 감지 | 80.2% | 0.887 | 5개 독립 RH-only run의 물방울 색만 사용 |
 
-H2 모델은 불꽃 색과 불꽃-물방울 대비(습도에 의한 공통 색 이동 보정)를 사용합니다. RH 모델은 물방울 색만 사용하며, simultaneous 영상의 RH 설정값은 학습 정답에 들어가지 않습니다. 두 모델이 모두 양성이면 simultaneous로 표시합니다. 흰색·회색 보정 패치로 LAB 색 편향을 먼저 보정하고, 고정된 불꽃/물방울 형태 영역에서만 특징을 계산합니다. 카메라 활성화 후 0.5초만 준비하고, 촬영 버튼을 누르는 순간 한 프레임을 고정해 분석하므로 손으로 들고 있는 동안의 이동 평균으로 ROI가 흐려지지 않습니다.
+상태 모델은 불꽃·물방울·전체 고채도 영역의 LAB 변화량을 함께 사용해 Initial, H2-only, H2O-only, simultaneous를 직접 분류합니다. RH 농도 모델은 H2O-only 물방울 색만 사용하며 simultaneous 영상의 RH 설정값은 정량 학습 정답에 들어가지 않습니다. 흰색·회색 보정 패치로 LAB 색 편향을 먼저 보정하고 고정된 불꽃/물방울 형태 영역에서만 특징을 계산합니다. 카메라 활성화 후 0.5초만 준비하고, 촬영 버튼을 누르는 순간 한 프레임을 고정해 분석하므로 손으로 들고 있는 동안의 이동 평균으로 ROI가 흐려지지 않습니다.
 
 현재 방향과 타임라인을 확인한 43개 분할/단독 영상에서 4,373개 특징 프레임을 관리합니다. H2-only와 일반 H2O-only 영상은 최소 2 Hz, 짧은 response 영상 두 개는 확정 범위까지 4 Hz로 추출합니다. 상태 검증에서는 고밀도 정량 프레임이 특정 영상에 과도한 가중치를 주지 않도록 일반 영상을 4초 간격으로 다시 샘플링하며, simultaneous RH90 reaction은 포화 범위로 제외합니다. 최종 상태 검증 표본은 16개 독립 실험 그룹의 741프레임입니다. 한 원본 실험에서 RH별로 잘라낸 클립은 같은 그룹으로 묶어 통째로 홀드아웃하므로 촬영 조건이 학습과 검증에 동시에 들어가지 않습니다. 타임라인이 없거나 ROI·방향이 확인되지 않은 기존 긴 영상은 예측 검토용으로만 남기고 학습·검증 수치에서 제외했습니다.
 
 단일 축 검출기의 독립 영상 홀드아웃 성능은 H2 반응 balanced accuracy 81.2%, AUC 0.902, RH 70% 이상 반응 balanced accuracy 80.2%, AUC 0.887입니다. H2 정량은 불꽃 영역을, RH 정량은 H2O-only 물방울 영역을 사용합니다. 두 검출기와 4상태 직접 모델 모두 새로운 센서·조명·카메라에 대한 외부 검증은 아직 필요합니다.
 
-검증된 방향표로 정렬한 `1_70_2.MOV`와 `1_80_2.MOV`를 포함하고 Recovery 마지막 안정 구간만 Initial로 사용합니다. `1_90_H2O_only_3(response)`와 `1_90_H2O_only_6(response)`는 제공된 정식 타임라인으로 상태·정량 검증에 포함하며, 각각 38초와 32초 이후의 범위 초과 구간은 제외합니다. simultaneous 상태 목표는 명목 RH30--80이며 RH90 reaction은 `saturated/out-of-scope`로 제외합니다. 최선 직접 4상태 모델의 프레임 정확도는 71.1%, balanced accuracy는 70.2%, 안정 구간 평균 정확도는 80.0%, 안정 구간 balanced accuracy는 78.8%입니다. 상태별 재현율은 Initial 82.2%, H2-only 76.3%, H2O-only 78.6%, simultaneous 43.9%입니다. 확률 0.50 이상만 판정하면 coverage 42.4%, 판정 정확도는 88.5%입니다. 홀드아웃별 임계값 보정 시 simultaneous 재현율은 47.0%입니다. simultaneous 재현율이 아직 부족해 직접 4상태 모델은 앱 기본 판정기로 배포하지 않습니다. 타임라인과 영상 반응이 충돌하는 구간은 `training/output/simultaneous_review`에 run별 판별 시트로 보존합니다.
+검증된 방향표로 정렬한 `1_70_2.MOV`와 `1_80_2.MOV`를 포함하고 Recovery 마지막 안정 구간만 Initial로 사용합니다. `1_90_H2O_only_3(response)`와 `1_90_H2O_only_6(response)`는 제공된 정식 타임라인으로 상태·정량 검증에 포함하며, 각각 38초와 32초 이후의 범위 초과 구간은 제외합니다. simultaneous 상태 목표는 명목 RH30--80이며 RH90 reaction은 `saturated/out-of-scope`로 제외합니다. 앱에 배포한 320-tree 직접 4상태 모델의 프레임 정확도는 71.0%, balanced accuracy는 70.1%, 안정 구간 정확도는 80.0%, simultaneous 재현율은 42.7%입니다. 최고 상태 확률 0.35 이상만 표시하면 coverage 92.6%, 판정 정확도 73.8%이며 나머지는 `Uncertain / Retake`로 처리합니다. 타임라인과 영상 반응이 충돌하는 구간은 `training/output/simultaneous_review`에 run별 판별 시트로 보존합니다.
 
 앱은 촬영 순간의 단일 프레임을 분석하고, 분류가 확실하며 Initial 보정을 마친 경우에만 검증된 강한 반응 범위의 숫자를 표시합니다. H2 숫자는 불꽃 LAB 특징, RH 숫자는 H2O-only 물방울 LAB 특징으로만 학습한 보정식을 사용합니다. simultaneous 영상에 단독 RH식을 그대로 적용하면 명목 RH20--80이 약 75--83%로 뭉쳐 낮은 RH를 크게 과대평가했습니다. 따라서 간섭 보정 전까지 simultaneous의 RH 숫자는 앱에서 숨기고 상태만 표시하며, H2 숫자는 검증 범위 안에서만 표시합니다. 단독 조건 숫자 표시 범위는 H2 3--4%(독립 영상 MAE 0.44%p)와 RH 70--90%(MAE 8.04%p)입니다. 농도 변경 후 5초 미만 프레임은 정량 학습·검증에서 제외했습니다. 전체 0--4% 및 RH 20--90% 모델은 농도별 오차가 불균형하여 범위 밖 숫자를 표시하지 않습니다. 이 값은 연구용 광학 추정치이며 인증된 정량 계측값이 아닙니다.
+
+H2-only 영상에서 불꽃 변화로 예측한 물방울 간섭을 simultaneous 물방울 특징에서 빼는 보정도 검증했습니다. 명목 단계와 optical-equivalent RH의 순서 상관은 0.929에서 0.964로 개선됐지만 결과 범위가 여전히 약 77--83%로 압축됩니다. 명목 RH는 실제 광학 RH 정답이 아니므로 이 결과만으로 농도 정확도를 주장하거나 앱 숫자를 표시하지 않습니다.
 
 H2 ramp 타임라인은 명목 농도로 보존합니다. H2-only 영상은 제공된 단계값을 그대로 사용하고, Recovery 시작부터 H2 0%로 수정했습니다. 각 영상의 색 반응을 다른 영상으로 학습한 색 예측값과 비교해 반응 지연을 별도로 추정하되, 30초와 60초 탐색에서 최적값이 유지되고 오차 개선이 충분한 경우에만 적용합니다. 타임라인이 없거나 ROI 방향이 검증되지 않은 기존 캐시는 지연 추정과 정량 검증에서 제외합니다. 상세 지연값과 탈락 사유는 `training/output/h2_lag_report.json`에 기록됩니다.
 
@@ -72,8 +74,9 @@ python -m venv .venv
   --video-root "C:\path\to\recordings\1"
 .venv\Scripts\python training\state_condition_analysis.py
 .venv\Scripts\python training\quantitative_analysis.py
+.venv\Scripts\python training\simultaneous_interference_analysis.py
 ```
 
-지연 상세와 신뢰 여부는 `training/output/h2_lag_report.json`에 저장됩니다. 학습 산출물은 `training/output/metrics.json`, `training/output/models.json`, `sensor-model.js`에 저장됩니다. 영상과 캐시는 용량 때문에 저장소에서 제외합니다.
+지연 상세와 신뢰 여부는 `training/output/h2_lag_report.json`에 저장됩니다. 학습 산출물은 `training/output/metrics.json`, `training/output/models.json`, `sensor-model.js`, `sensor-state-model.js`에 저장됩니다. 영상과 캐시는 용량 때문에 저장소에서 제외합니다.
 
 정량 모델 후보와 영상 단위 오차는 `training/quantitative_analysis.py`로 비교합니다. 논문용 검증 Figure는 `training/output/quantitative/quantitative_validation`의 PNG(600 dpi), PDF, SVG로 생성되며, 동일 Figure의 점과 전체 예측값을 CSV로 함께 저장합니다.

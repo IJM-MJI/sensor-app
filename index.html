@@ -120,7 +120,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.13 · H2/RH model v3 · instant capture</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.13 · four-state model v4</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -202,8 +202,9 @@ body{
 </div>
 
 <script src="sensor-model.js?v=20260813-3"></script>
+<script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.13-H2-RH-v3-instant';
+var APP_VERSION='2026.08.13-four-state-v4';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -393,6 +394,19 @@ function forestProb(model,v){
   }
   return sum/model.trees.length;
 }
+function multiclassForestProb(model,v){
+  var sums=new Array(model.classes.length).fill(0);
+  for(var i=0;i<model.trees.length;i++){
+    var tree=model.trees[i],node=0;
+    while(tree.feature[node]>=0){
+      node=v[tree.feature[node]]<=tree.threshold[node]?tree.left[node]:tree.right[node];
+    }
+    for(var j=0;j<sums.length;j++)sums[j]+=tree.probability[node][j];
+  }
+  var out={};
+  for(var j=0;j<sums.length;j++)out[model.classes[j]]=sums[j]/model.trees.length;
+  return out;
+}
 function ridgeEstimate(model,f){
   if(!model)return null;
   var v=stateFeatures(model,f),out=model.intercept;
@@ -400,15 +414,18 @@ function ridgeEstimate(model,f){
   return out;
 }
 doClassify=function(f){
-  var hv=stateFeatures(SENSOR_MODEL.h2_presence,f);
-  var rv=stateFeatures(SENSOR_MODEL.rh_high,f);
-  var h2p=forestProb(SENSOR_MODEL.h2_presence,hv);
-  var rhp=forestProb(SENSOR_MODEL.rh_high,rv);
-  var h2=h2p>=SENSOR_MODEL.h2_presence.threshold;
-  var rh=rhp>=SENSOR_MODEL.rh_high.threshold;
-  var margin=Math.min(Math.abs(h2p-.5),Math.abs(rhp-.5));
-  var uncertain=margin<.10;
-  var state=uncertain?'undecided':(h2?(rh?'simultaneous':'H2_only'):(rh?'H2O_only':'initial'));
+  var sv=stateFeatures(SENSOR_STATE_MODEL,f);
+  var stateProb=multiclassForestProb(SENSOR_STATE_MODEL,sv);
+  var ranked=SENSOR_STATE_MODEL.classes.slice().sort(function(a,b){return stateProb[b]-stateProb[a];});
+  var maxProb=stateProb[ranked[0]],gap=maxProb-stateProb[ranked[1]];
+  // Video-held-out validation: max probability >=.35 retains 92.6% of frames
+  // at 73.8% accepted-frame accuracy. Lower confidence is reported as uncertain.
+  var uncertain=maxProb<.35;
+  var state=uncertain?'undecided':ranked[0];
+  var h2=!uncertain&&(state==='H2_only'||state==='simultaneous');
+  var rh=!uncertain&&(state==='H2O_only'||state==='simultaneous');
+  var h2p=(stateProb.H2_only||0)+(stateProb.simultaneous||0);
+  var rhp=(stateProb.H2O_only||0)+(stateProb.simultaneous||0);
   var h2Estimate=null,rhEstimate=null,h2OutOfRange=false,rhOutOfRange=false,rhSimPending=false;
   if(!uncertain){
     var rawH2=ridgeEstimate(SENSOR_MODEL.h2_concentration,f);
@@ -421,10 +438,11 @@ doClassify=function(f){
     rhOutOfRange=rh&&!rhSimPending&&rawRH>90;
     rhEstimate=rh&&!rhSimPending&&rawRH>=65&&rawRH<=95?Math.max(70,Math.min(90,rawRH)):null;
   }
-  return{state:state,conf:margin>=.20?'high':(margin>=.10?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
+  return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Estimate:h2Estimate,rhEstimate:rhEstimate,h2OutOfRange:h2OutOfRange,
     rhOutOfRange:rhOutOfRange,rhSimPending:rhSimPending,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
+    stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
     dFlameB:Math.round(stateDelta(f,'flame_b')*10)/10,
     dDropA:Math.round(stateDelta(f,'drop_a')*10)/10,
@@ -447,7 +465,8 @@ function showResult(r){
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
-  var vals=(r.h2p===undefined?'':'pH2='+r.h2p+' pRH='+r.rhp+'  ')
+  var vals=(r.h2p===undefined?'':'pH2='+r.h2p+' pRH='+r.rhp+
+    (r.stateConfidence===undefined?'':' pState='+r.stateConfidence+' gap='+r.stateGap)+'  ')
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
   document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>';
@@ -958,7 +977,7 @@ function drawDebugOverlay(r){
 
 // ===== LOAD OPENCV =====
 function onReady(){
-  if(typeof window.SENSOR_MODEL==='undefined'){
+  if(typeof window.SENSOR_MODEL==='undefined'||typeof window.SENSOR_STATE_MODEL==='undefined'){
     document.getElementById('loadingScreen').innerHTML=
       '<p style="color:#f44336;padding:40px">H2/RH model failed to load.<br>Reload the page without cache.</p>';
     return;
