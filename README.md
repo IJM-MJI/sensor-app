@@ -67,7 +67,7 @@ H2의 긴 4% hold가 전체 점수를 부풀리는지 확인하기 위해 Reacti
 
 `training/h2_endpoint_range_analysis.py`는 구간 마지막 1초를 정확한 endpoint, 구간 내부를 농도 범위로 취급하고 4% hold와 baseline의 총 가중치를 제한합니다. 동일한 96개 endpoint 프레임에서 현재 Reaction 모델은 정확도 63.5%, stage-balanced 61.2%, ±1% 이내 94.8%, MAE 0.42%p였습니다. 범위 가중치와 규제를 outer test 영상 밖에서만 선택한 nested 범위 모델은 정확도 53.1%, MAE 0.54%p로 더 낮아 최종 모델로 채택하지 않습니다. Endpoint 평가는 별도의 엄격한 audit로 유지하고, recovery는 두 방식 모두 정량 학습에서 제외합니다.
 
-`training/inspect_reference_patches.py`는 회전 정규화 뒤 위-오른쪽과 아래-왼쪽의 흰색/회색 패치를 직접 검출해 시각 QA를 생성합니다. 패치 색을 고정 LAB 값으로 강제하는 보정은 전체 ramp 점수를 소폭 높였지만 4% endpoint를 크게 낮췄고, 두 패치 중심으로 미세 정렬하는 방식도 video-held-out 정확도를 40.9%로 낮췄습니다. 따라서 두 실험은 검출/audit 코드로만 보존하며 배포 특징 추출기는 기존 중성 픽셀 보정과 원형 ROI/quarter-turn 정렬을 유지합니다.
+`training/inspect_reference_patches.py`는 회전 정규화 뒤 위-오른쪽과 아래-왼쪽의 흰색/회색 패치를 직접 검출해 시각 QA를 생성합니다. 이 패치는 학습 영상 촬영 안정화를 위한 것이며 실제 앱 촬영에는 없으므로 배포 입력이나 모델 특징으로 요구하지 않습니다. 패치 색을 고정 LAB 값으로 강제하는 보정은 전체 ramp 점수를 소폭 높였지만 4% endpoint를 크게 낮췄고, 패치 제거 또는 두 패치 중심 미세 정렬도 held-out 성능을 낮췄습니다. 따라서 관련 실험은 audit 코드로만 보존하며 배포 특징 추출기는 기존 중성 픽셀 보정과 원형 ROI/quarter-turn 정렬을 유지합니다.
 
 Calibration 프레임에서 불꽃/물방울 픽셀을 완전히 고정하는 방식도 별도로 시험했습니다. RH 70--90% 회귀 오차는 4.97%p로 감소했지만 4상태 balanced accuracy가 70.1%에서 60.1%로 낮아지고 전체 농도 단계 오차가 증가해 채택하지 않았습니다. 다음 추출기는 원 위치를 유지하되 촬영 중의 미세 회전·이동을 먼저 정합한 뒤 고정 마스크를 적용해야 합니다.
 
