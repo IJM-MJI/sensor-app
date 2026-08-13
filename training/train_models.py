@@ -149,8 +149,10 @@ def manifest() -> list[Clip]:
         (0, 2, 20), (2, 3, 30), (3, 5, 40), (5, 7, 50),
         (7, 11, 60), (11, 25, 70), (25, 28, 80), (28, 38, 90),
     )
-    h2_test = ((0, 15, 1), (15, 25, 2), (25, 30, 3), (30, 201, 4))
-    h2_test_2 = ((0, 4, 0), (4, 13, 1), (13, 21, 2), (21, 30, 3), (30, 150, 4))
+    # H2 timeline intervals end when the listed concentration is reached; they
+    # are ramps, not plateaus. A repeated endpoint is an actual hold.
+    h2_test = ((0, 15, 1), (15, 25, 2), (25, 30, 3), (30, 40, 4), (40, 201, 4))
+    h2_test_2 = ((0, 4, 0), (4, 13, 1), (13, 21, 2), (21, 30, 3), (30, 51, 4), (51, 150, 4))
     h2_test_3 = ((0, 3, 0), (3, 10, 1), (10, 20, 2), (20, 28, 3), (28, 152, 4))
     h2_indoor_4 = ((0, 5, 0), (5, 13, 1), (13, 30, 2), (30, 109, 3), (109, 122, 4), (122, 266, 0))
     h2_daylight_5 = ((0, 5, 0), (5, 8, 1), (8, 13, 2), (13, 21, 3), (21, 130, 4), (130, 272, 0))
@@ -485,6 +487,17 @@ def stable_segment_value(segments: Iterable[tuple[float, float, float]], t: floa
     return None
 
 
+def ramp_segment_value(segments: Iterable[tuple[float, float, float]], t: float) -> float | None:
+    """Interpolate between concentrations reached at successive interval ends."""
+    previous = 0.0
+    for start, end, target in segments:
+        if start <= t <= end:
+            fraction = np.clip((t - start) / max(end - start, 1e-9), 0, 1)
+            return float(previous + fraction * (target - previous))
+        previous = float(target)
+    return None
+
+
 def recovery_tail_start(start: float, end: float) -> float:
     """Use only the final stable recovery window, capped at twelve seconds."""
     return max(start + .70 * (end - start), end - 12.0)
@@ -494,7 +507,7 @@ def labels_for(clip: Clip, t: float, duration: float) -> tuple[int | None, int |
     h2_present: int | None = None
     rh_high: int | None = None
     state: str | None = None
-    h2_value = stable_segment_value(clip.h2_segments, t)
+    h2_value = ramp_segment_value(clip.h2_segments, t)
     rh_value = stable_segment_value(clip.segments, t)
     if clip.kind == "h2_only":
         rh_high = None
@@ -801,18 +814,17 @@ def export_forest(model: ExtraTreesClassifier, name: str, features: list[str]) -
 
 def evaluate_regression(rows: list[dict[str, object]], label: str, features: list[str]) -> tuple[dict[str, object], dict[str, float]] | None:
     use = [r for r in rows if r[label] is not None and (label != "rh_value" or r["kind"] == "rh_only")]
-    # The deployed classifiers are validated only for strong H2 response and
-    # high humidity. Fit the displayed number over that same operating range;
-    # lower concentrations remain explicitly unquantified in the app.
-    lower = 3.0 if label == "h2_value" else 70.0
+    # H2 timelines are continuous ramp endpoints, so all 0--4% values are now
+    # valid quantitative targets. RH retains its independently validated range.
+    lower = 0.0 if label == "h2_value" else 70.0
     use = [r for r in use if float(r[label]) >= lower]
     # Exclude early transients: do not train or validate a concentration before
     # that nominal step has persisted for 4.5 seconds.
-    stable_use: list[dict[str, object]] = []
+    stable_use: list[dict[str, object]] = list(use) if label == "h2_value" else []
     by_video: dict[str, list[dict[str, object]]] = {}
     for row in use:
         by_video.setdefault(str(row["video"]), []).append(row)
-    for video_rows in by_video.values():
+    for video_rows in ([] if label == "h2_value" else by_video.values()):
         video_rows.sort(key=lambda row: float(row["time"]))
         segment_start = float(video_rows[0]["time"])
         previous = float(video_rows[0][label])
@@ -851,7 +863,7 @@ def evaluate_regression(rows: list[dict[str, object]], label: str, features: lis
     exported = {
         "type": "ridge_regression", "features": features,
         "intercept": intercept, "coefficients": coef.tolist(),
-        "calibrated_range": [3, 4] if label == "h2_value" else [70, 90],
+        "calibrated_range": [0, 4] if label == "h2_value" else [70, 90],
         "validation": metrics["evaluation"], "mae": metrics["mae"],
         "status": "experimental",
     }

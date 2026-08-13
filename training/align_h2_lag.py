@@ -22,19 +22,16 @@ from sklearn.metrics import mean_absolute_error
 from train_models import H2_FEATURES, feature_value, read_legacy_continuous
 
 
-# Exact nominal H2 steps supplied with the experiment timelines.  Values apply
-# from the listed second until the next boundary.  The final zero in runs 4 and
-# 5 is the start of Recovery, not a gradual 4 -> 0 concentration ramp.
-H2_STEP_TIMELINES: dict[str, list[tuple[float, float]]] = {
-    "1_90_H2_only_test.mp4": [(0, 1), (15, 2), (25, 3), (30, 4)],
-    "1_90_H2_only_test_2.mp4": [(0, 0), (4, 1), (13, 2), (21, 3), (30, 4)],
-    "1_90_H2_only_test_3.MOV": [(0, 0), (3, 1), (10, 2), (20, 3), (28, 4)],
-    "1_90_H2_only_4.mp4": [(0, 0), (5, 1), (13, 2), (30, 3), (109, 4), (122, 0)],
-    "1_90_H2_only_5.mp4": [(0, 0), (5, 1), (8, 2), (13, 3), (21, 4), (130, 0)],
-}
 RECOVERY_START = {
     "1_90_H2_only_4.mp4": 122.0,
     "1_90_H2_only_5.mp4": 130.0,
+}
+H2_RAMP_ENDPOINTS = {
+    "1_90_H2_only_test.mp4": [(0, 0), (15, 1), (25, 2), (30, 3), (40, 4)],
+    "1_90_H2_only_test_2.mp4": [(0, 0), (4, 0), (13, 1), (21, 2), (30, 3), (51, 4)],
+    "1_90_H2_only_test_3.MOV": [(0, 0), (3, 0), (10, 1), (20, 2), (28, 3), (152, 4)],
+    "1_90_H2_only_4.mp4": [(0, 0), (5, 0), (13, 1), (30, 2), (109, 3), (122, 4)],
+    "1_90_H2_only_5.mp4": [(0, 0), (5, 0), (8, 1), (13, 2), (21, 3), (130, 4)],
 }
 
 
@@ -42,14 +39,9 @@ def apply_supplied_nominal_timeline(row: dict[str, object]) -> None:
     """Replace legacy interpolation with the supplied nominal experiment state."""
     video = str(row["video"])
     seconds = float(row["time"])
-    steps = H2_STEP_TIMELINES.get(video)
+    steps = H2_RAMP_ENDPOINTS.get(video)
     if steps:
-        value = steps[0][1]
-        for start, candidate in steps:
-            if seconds < start:
-                break
-            value = candidate
-        row["h2_value"] = float(value)
+        row["h2_value"] = step_value_at(video, seconds)
         row["phase"] = "recovery" if seconds >= RECOVERY_START.get(video, float("inf")) else "reaction"
     elif str(row.get("phase")) == "recovery":
         # Recovery was RH 20%, H2 0%; it was not a linear concentration ramp.
@@ -57,15 +49,17 @@ def apply_supplied_nominal_timeline(row: dict[str, object]) -> None:
 
 
 def step_value_at(video: str, seconds: float) -> float:
-    """Return the piecewise-constant nominal value, including pre-run H2 0%."""
+    """Return the supplied ramp-endpoint concentration at camera time."""
     if seconds < 0:
         return 0.0
-    value = 0.0
-    for start, candidate in H2_STEP_TIMELINES[video]:
-        if seconds < start:
-            break
-        value = candidate
-    return float(value)
+    if video in H2_RAMP_ENDPOINTS:
+        points = list(H2_RAMP_ENDPOINTS[video])
+        if video in RECOVERY_START:
+            duration = 266.0 if video.endswith("_4.mp4") else 272.0
+            points.append((duration, 0.0))
+        time, value = zip(*points)
+        return float(np.interp(seconds, time, value))
+    return 0.0
 
 
 def regression_model() -> ExtraTreesRegressor:
@@ -112,7 +106,7 @@ def shifted_targets(rows: list[dict[str, object]], lag_by_phase: dict[str, float
         time = np.asarray([float(rows[i]["time"]) for i in run])
         value = np.asarray([float(rows[i]["h2_value"]) for i in run])
         video = str(rows[run[0]]["video"])
-        if phase == "reaction" and video in H2_STEP_TIMELINES:
+        if phase == "reaction" and video in H2_RAMP_ENDPOINTS:
             result[run] = [step_value_at(video, seconds - lag) for seconds in time]
             continue
         left = 0.0 if phase == "reaction" else 4.0

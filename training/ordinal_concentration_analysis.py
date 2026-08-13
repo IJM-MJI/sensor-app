@@ -35,6 +35,18 @@ TASKS = {
 }
 MIN_STABLE_SECONDS = 1.0
 
+# User timelines describe ramp endpoints, not piecewise-constant plateaus.
+# (time, concentration reached at that time). Runs 4/5 then recover linearly
+# from 4% to 0% by the final frame.
+H2_RAMP_ENDPOINTS = {
+    "1_90_H2_only_test.mp4": [(0, 0), (15, 1), (25, 2), (30, 3), (40, 4)],
+    "1_90_H2_only_test_2.mp4": [(0, 0), (4, 0), (13, 1), (21, 2), (30, 3), (51, 4)],
+    "1_90_H2_only_test_3.MOV": [(0, 0), (3, 0), (10, 1), (20, 2), (28, 3), (152, 4)],
+    "1_90_H2_only_4.mp4": [(0, 0), (5, 0), (13, 1), (30, 2), (109, 3), (122, 4)],
+    "1_90_H2_only_5.mp4": [(0, 0), (5, 0), (8, 1), (13, 2), (21, 3), (130, 4)],
+}
+H2_RECOVERY_START = {"1_90_H2_only_4.mp4": 122.0, "1_90_H2_only_5.mp4": 130.0}
+
 
 class OrdinalLogistic(BaseEstimator, ClassifierMixin):
     """Learn P(level >= threshold) so neighbouring stages remain ordered."""
@@ -71,8 +83,27 @@ class OrdinalLogistic(BaseEstimator, ClassifierMixin):
 
 
 def target_value(row, config):
+    if config["label"] == "h2_value" and "analysis_stage" in row:
+        return float(row["analysis_stage"])
     value = float(row[config["label"]])
     return 25.0 if config["label"] == "rh_value" and value <= 30 else value
+
+
+def assign_h2_ramp_targets(rows):
+    """Replace the earlier plateau interpretation with endpoint interpolation."""
+    for row in rows:
+        video = str(row["video"])
+        if video not in H2_RAMP_ENDPOINTS:
+            continue
+        points = list(H2_RAMP_ENDPOINTS[video])
+        duration = float(row["duration"])
+        recovery_start = H2_RECOVERY_START.get(video)
+        if recovery_start is not None:
+            points.append((duration, 0.0))
+        seconds, values = zip(*points)
+        continuous = float(np.interp(float(row["time"]), seconds, values))
+        row["continuous_target"] = continuous
+        row["analysis_stage"] = float(np.clip(np.floor(continuous + .5), 0, 4))
 
 
 def add_stability(rows):
@@ -258,17 +289,15 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     rows = read_csv(Path("training/cache") / CACHE_VERSION / "features.csv")
     add_stability(rows)
+    assign_h2_ramp_targets(rows)
     reports, paths, all_predictions = {}, {}, []
     for task, config in TASKS.items():
         task_rows = [row for row in rows if row["kind"] == config["kind"]
                      and row.get(config["label"]) is not None
-                     and float(row[config["label"] + "_stable_seconds"]) >= MIN_STABLE_SECONDS]
+                     and (task == "H2" or
+                          float(row[config["label"] + "_stable_seconds"]) >= MIN_STABLE_SECONDS)]
         if task == "H2":
-            # Nominal H2 becomes 0% at recovery start, but the optical response
-            # remains H2-like for most of recovery. Only true initial frames and
-            # the user-specified final recovery tail may supervise the 0% class.
-            task_rows = [row for row in task_rows if float(row["h2_value"]) > 0
-                         or str(row.get("state") or "") in {"none", "baseline_recovery"}]
+            task_rows = [row for row in task_rows if "analysis_stage" in row]
         paths[task] = colour_path(task_rows, config)
         models, predictions, within_run_models, within_run_predictions = {}, {}, {}, {}
         for name, estimator in candidates().items():

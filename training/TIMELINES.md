@@ -124,18 +124,20 @@ The 13:53-14:14 interval in `1_70_2.MOV` is unlabelled and excluded.
 
 ## H2-only concentration references
 
-| Video | 0% | 1% | 2% | 3% | 4% | Recovery |
-|---|---|---|---|---|---|---|
-| `1_90_H2_only_test.mp4` | before recording | 0-15 s | 15-25 s | 25-30 s | 30 s-end | - |
-| `1_90_H2_only_test_2.mp4` | 0-4 s | 4-13 s | 13-21 s | 21-30 s | 30 s-end | - |
-| `1_90_H2_only_test_3.MOV` | 0-3 s | 3-10 s | 10-20 s | 20-28 s | 28-152 s | - |
-| `1_90_H2_only_4.mp4` | 0-5 s | 5-13 s | 13-30 s | 30-109 s | 109-122 s | 122 s-end |
-| `1_90_H2_only_5.mp4` | 0-5 s | 5-8 s | 8-13 s | 13-21 s | 21-130 s | 130 s-end |
+These times are **ramp endpoints**, not plateau starts. Concentration is linearly
+interpolated between endpoints. Recovery also decreases progressively and reaches
+0% only at its final endpoint.
 
-`1_90_H2_only_test.mp4` has no timed 0% segment inside the recording, so it
-uses the indoor 0% baseline from `1_90_H2_only_test_2.mp4`. Concentrations 1%
-and 2% are treated as an uncertain transition band; binary H2 training uses
-only 0% as negative and 3--4% as positive.
+| Video | 0% reached | 1% reached | 2% reached | 3% reached | 4% reached | 0% recovery reached |
+|---|---:|---:|---:|---:|---:|---:|
+| `1_90_H2_only_test.mp4` | 0 s | 15 s | 25 s | 30 s | 40 s, then hold | - |
+| `1_90_H2_only_test_2.mp4` | 4 s | 13 s | 21 s | 30 s | 51 s, then hold | - |
+| `1_90_H2_only_test_3.MOV` | 3 s | 10 s | 20 s | 28 s | 152 s | - |
+| `1_90_H2_only_4.mp4` | 5 s | 13 s | 30 s | 109 s | 122 s | 266 s |
+| `1_90_H2_only_5.mp4` | 5 s | 8 s | 13 s | 21 s | 130 s | 272 s |
+
+Binary H2 training still uses only the strong-response range as positive, while
+the quantitative analysis uses the interpolated 0--4% targets.
 
 ## H2O-only humidity references
 
