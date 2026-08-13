@@ -803,8 +803,8 @@ def evaluate_regression(rows: list[dict[str, object]], label: str, features: lis
     # lower concentrations remain explicitly unquantified in the app.
     lower = 3.0 if label == "h2_value" else 70.0
     use = [r for r in use if float(r[label]) >= lower]
-    # Match the app's five-second observation: do not train or validate a
-    # concentration before that nominal step has persisted for 4.5 seconds.
+    # Exclude early transients: do not train or validate a concentration before
+    # that nominal step has persisted for 4.5 seconds.
     stable_use: list[dict[str, object]] = []
     by_video: dict[str, list[dict[str, object]]] = {}
     for row in use:

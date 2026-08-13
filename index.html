@@ -120,7 +120,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.13 · H2/RH model v1</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.13 · H2/RH model v3 · instant capture</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -156,7 +156,7 @@ body{
     <div id="roiGuide"></div>
     <div id="procOverlay" class="proc-overlay hidden">
       <div class="spin"></div>
-      <span id="procText">Accumulating 5 s...</span>
+      <span id="procText">Analyzing photo...</span>
     </div>
     <div id="calOverlay" style="position:absolute;bottom:0;left:0;width:100%;padding:10px;background:rgba(0,0,0,0.6);text-align:center;z-index:5">
       <div style="color:#fff;font-size:14px">Calibrate at RH 20%, H2 0% · Align flame above droplet</div>
@@ -201,9 +201,9 @@ body{
   <div class="dbg" id="dbg"></div>
 </div>
 
-<script src="sensor-model.js?v=20260813-1"></script>
+<script src="sensor-model.js?v=20260813-3"></script>
 <script>
-var APP_VERSION='2026.08.13-H2-RH-v1';
+var APP_VERSION='2026.08.13-H2-RH-v3-instant';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -603,7 +603,9 @@ function initCam(){
     sb.style.opacity='0.3';sb.style.pointerEvents='none';
     var sm=document.getElementById('stabilizeMsg');
     if(sm) sm.style.display='';
-    setTimeout(enableShutter,3000);
+    // Allow one brief camera warm-up so the first frame is valid without
+    // making the operator hold the phone still for several seconds.
+    setTimeout(enableShutter,500);
   }).catch(function(e){
     document.getElementById('dbg').textContent='Camera: '+e.message;
   });
@@ -633,23 +635,13 @@ function capture(){
   document.getElementById('shutterBtn').classList.add('hidden');
   document.getElementById('procOverlay').classList.remove('hidden');
   cvs.width=vw; cvs.height=vh;
-  // Build one causal five-second observation from eleven frames. This matches
-  // the stable-segment validation scale and suppresses momentary reflections.
-  var fi=0, nF=11;
+  // Freeze one frame immediately. Multi-second averaging blurred the fixed
+  // flame/drop ROIs when the phone moved between frames.
   var procText=document.getElementById('procText');
-  if(procText) procText.textContent='Accumulating 5 s...';
-  function grabNext(){
-    ctx2d.globalAlpha=1.0/(fi+1);
-    ctx2d.drawImage(vid,0,0);
-    fi++;
-    if(fi<nF){ setTimeout(grabNext,500); }
-    else{
-      ctx2d.globalAlpha=1.0;
-      if(procText) procText.textContent='Analyzing...';
-      finishCapture();
-    }
-  }
-  grabNext();
+  if(procText) procText.textContent='Analyzing photo...';
+  ctx2d.globalAlpha=1.0;
+  ctx2d.drawImage(vid,0,0);
+  finishCapture();
 }
 function finishCapture(){
   var url=cvs.toDataURL('image/jpeg',0.92);
