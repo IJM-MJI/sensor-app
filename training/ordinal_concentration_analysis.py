@@ -35,6 +35,23 @@ TASKS = {
 }
 MIN_STABLE_SECONDS = 1.0
 
+FEATURE_NAMES = {
+    "H2": [
+        "flame_L", "flame_a", "flame_b", "flame_chroma", "flame_sin_hue",
+        "flame_cos_hue", "flame_minus_drop_L", "flame_minus_drop_a",
+        "flame_minus_drop_b", "baseline_flame_L", "baseline_flame_a",
+        "baseline_flame_b", "baseline_flame_minus_drop_L",
+        "baseline_flame_minus_drop_a", "baseline_flame_minus_drop_b",
+        "flame_chroma_p10", "flame_chroma_p25", "flame_chroma_p50",
+        "flame_chroma_p75", "flame_chroma_p90",
+    ],
+    "RH": [
+        "drop_L", "drop_a", "drop_b", "drop_chroma", "drop_sin_hue",
+        "drop_cos_hue", "drop_minus_flame_L", "drop_minus_flame_a",
+        "drop_minus_flame_b",
+    ],
+}
+
 # User timelines describe ramp endpoints, not piecewise-constant plateaus.
 # (time, concentration reached at that time). Runs 4/5 then recover linearly
 # from 4% to 0% by the final frame.
@@ -271,6 +288,76 @@ def nearest_level(values, levels):
     return levels[np.argmin(np.abs(np.asarray(values)[:, None] - levels[None, :]), axis=1)]
 
 
+def balanced_sample_weight(y, levels):
+    counts = {level: int(np.sum(y == level)) for level in levels}
+    return np.asarray([len(y) / max(len(levels) * counts[value], 1) for value in y])
+
+
+def export_regression_tree(tree):
+    source = tree.tree_
+    return {
+        "left": source.children_left.tolist(),
+        "right": source.children_right.tolist(),
+        "feature": source.feature.tolist(),
+        "threshold": source.threshold.tolist(),
+        "value": source.value[:, 0, 0].tolist(),
+    }
+
+
+def predict_exported(model, x):
+    if model["type"] == "linear_regression":
+        return model["intercept"] + np.asarray(x) @ np.asarray(model["coefficients"])
+    output = np.zeros(len(x), dtype=float)
+    for tree in model["trees"]:
+        for row_index, values in enumerate(x):
+            node = 0
+            while tree["feature"][node] >= 0:
+                feature = tree["feature"][node]
+                node = tree["left"][node] if values[feature] <= tree["threshold"][node] else tree["right"][node]
+            output[row_index] += tree["value"][node]
+    return output / len(model["trees"])
+
+
+def fit_and_export(rows, task, config, selected):
+    """Fit the held-out-selected estimator on all labelled runs for the browser."""
+    estimator = clone(candidates()[selected])
+    x = np.asarray([augment(row, config["region"]) for row in rows])
+    y = np.asarray([target_value(row, config) for row in rows])
+    fit_kwargs = {}
+    if selected.endswith("rounded"):
+        weights = balanced_sample_weight(y, np.asarray(config["levels"], dtype=float))
+        if hasattr(estimator, "steps"):
+            fit_kwargs[f"{estimator.steps[-1][0]}__sample_weight"] = weights
+        else:
+            fit_kwargs["sample_weight"] = weights
+    estimator.fit(x, y, **fit_kwargs)
+    common = {
+        "task": task,
+        "selected": selected,
+        "features": FEATURE_NAMES[task],
+        "levels": config["levels"],
+        "display_levels": config["display_levels"],
+        "policy": "nearest stage; adjacent range near a stage boundary",
+    }
+    if hasattr(estimator, "steps"):
+        scaler = estimator.named_steps["standardscaler"]
+        ridge = estimator.named_steps["ridge"]
+        coefficients = ridge.coef_ / scaler.scale_
+        exported = {**common, "type": "linear_regression",
+                    "intercept": float(ridge.intercept_ - np.dot(coefficients, scaler.mean_)),
+                    "coefficients": coefficients.tolist()}
+    elif isinstance(estimator, ExtraTreesRegressor):
+        exported = {**common, "type": "extra_trees_regression",
+                    "trees": [export_regression_tree(tree) for tree in estimator.estimators_]}
+    else:
+        raise RuntimeError(f"Selected {selected} cannot yet be exported")
+    error = np.max(np.abs(np.asarray(estimator.predict(x)) - predict_exported(exported, x)))
+    if error > 1e-9:
+        raise RuntimeError(f"Browser export parity failed for {task}: {error}")
+    exported["export_parity_max_abs_error"] = float(error)
+    return exported
+
+
 def evaluate(rows, config, estimator, name, protocol="video_holdout"):
     levels = np.asarray(config["levels"], dtype=float)
     x = np.asarray([augment(row, config["region"]) for row in rows])
@@ -431,7 +518,7 @@ def main():
     add_stability(rows)
     assign_h2_ramp_targets(rows)
     assign_rh_ramp_targets(rows)
-    reports, paths, all_predictions = {}, {}, []
+    reports, paths, all_predictions, deployed_models = {}, {}, [], {}
     for task, config in TASKS.items():
         task_rows = [row for row in rows if row["kind"] == config["kind"]
                      and row.get(config["label"]) is not None]
@@ -454,6 +541,7 @@ def main():
                          "within_run_models": within_run_models,
                          "colour_path": paths[task], "predictions": predictions[selected],
                          "within_run_predictions": within_run_predictions[selected]}
+        deployed_models[task.lower()] = fit_and_export(task_rows, task, config, selected)
         for protocol, source in (("video_holdout", predictions[selected]),
                                  ("within_run_blocks", within_run_predictions[selected])):
             for row in source:
@@ -479,7 +567,22 @@ def main():
                 all_predictions.append({"task": "H2", "protocol": protocol,
                                         "model": selected, **row})
     reports["H2"]["phase_analysis"] = phase_reports
+    deployment = {
+        "schema_version": 1,
+        "feature_extractor": "app-v7-neutral-balanced-shape-masks",
+        "h2_scope": "reaction_only",
+        "rh_scope": "h2o_only_equivalent",
+        "models": deployed_models,
+    }
     (output / "metrics.json").write_text(json.dumps(reports, indent=2), encoding="utf-8")
+    (output / "deployment-models.json").write_text(
+        json.dumps(deployment, ensure_ascii=False, indent=2), encoding="utf-8")
+    Path("sensor-concentration-model.js").write_text(
+        "// Generated by training/ordinal_concentration_analysis.py; do not edit by hand.\n"
+        + "window.SENSOR_CONCENTRATION_MODEL="
+        + json.dumps(deployment, ensure_ascii=False, separators=(",", ":")) + ";\n",
+        encoding="utf-8",
+    )
     with (output / "predictions.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(all_predictions[0])); writer.writeheader(); writer.writerows(all_predictions)
     plot(output, reports, paths)
