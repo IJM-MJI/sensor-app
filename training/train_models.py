@@ -83,6 +83,7 @@ class Clip:
     h2_segments: tuple[tuple[float, float, float], ...] = ()
     orientation_quarters: int = 0
     fixed_circle: tuple[int, int, int] | None = None
+    centered_crop: bool = False
     minimum_sample_hz: float = 0.0
     cache_tag: str = ""
     analysis_end: float | None = None
@@ -225,7 +226,10 @@ def resize_for_app(frame: np.ndarray, max_side: int = 480) -> np.ndarray:
     return cv2.resize(frame, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
 
 
-def circle_score(lab: np.ndarray, gray: np.ndarray, x: int, y: int, r: int) -> float:
+def circle_score(
+    lab: np.ndarray, gray: np.ndarray, x: int, y: int, r: int,
+    enforce_upper_frame: bool = True,
+) -> float:
     h, w = gray.shape
     ir = max(2, round(r * 0.5))
     yy, xx = np.ogrid[:h, :w]
@@ -248,16 +252,19 @@ def circle_score(lab: np.ndarray, gray: np.ndarray, x: int, y: int, r: int) -> f
     vertical_span = float((np.percentile(ys, 90) - np.percentile(ys, 10)) / max(r, 1))
     horizontal_span = float((np.percentile(xs, 90) - np.percentile(xs, 10)) / max(r, 1))
     layout = coverage + 0.05 * min(vertical_span, 1.8) + 0.02 * min(horizontal_span, 1.8)
-    # In all controlled recordings the chamber is in the upper 65% of frame.
+    # In the uncropped controlled recordings the chamber centre is in the upper
+    # half of the frame.
     # This prevents brightly coloured hoses/labels near the bottom from winning.
-    if y > h * 0.50:
+    if enforce_upper_frame and y > h * 0.50:
         return 0.0
     position = 1.0
     size_prior = math.sqrt(max(r, 1) / max(min(h, w), 1))
     return layout * position * size_prior
 
 
-def circle_candidates(frame: np.ndarray) -> list[tuple[int, int, int, float]]:
+def circle_candidates(
+    frame: np.ndarray, enforce_upper_frame: bool = True,
+) -> list[tuple[int, int, int, float]]:
     small = resize_for_app(frame)
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (9, 9), 2)
@@ -270,7 +277,8 @@ def circle_candidates(frame: np.ndarray) -> list[tuple[int, int, int, float]]:
         return []
     lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB)
     candidates = [tuple(map(int, np.round(c))) for c in circles[0]]
-    return [(x, y, r, circle_score(lab, gray, x, y, r)) for x, y, r in candidates]
+    return [(x, y, r, circle_score(lab, gray, x, y, r, enforce_upper_frame))
+            for x, y, r in candidates]
 
 
 def detect_circle(frame: np.ndarray) -> tuple[int, int, int]:
@@ -326,6 +334,60 @@ def circle_track(cap: cv2.VideoCapture, duration: float, interval: float = 8.0) 
     if not track:
         raise RuntimeError("No circular chamber found in tracking probes")
     return track
+
+
+def centered_crop_circle_track(
+    cap: cv2.VideoCapture, duration: float, interval: float = 4.0,
+) -> list[tuple[float, tuple[int, int, int]]]:
+    """Choose a temporally smooth chamber path in user-centred crops.
+
+    The production detector's upper-frame prior is correct for uncropped phone
+    photos but invalid after the user centres the chamber. Dynamic programming
+    prevents adjacent probes from switching between the aperture and fittings.
+    """
+    observations: list[tuple[float, list[tuple[int, int, int, float]]]] = []
+    for t in np.arange(0.5, max(0.6, duration), interval):
+        frame = frame_at(cap, float(t))
+        if frame is None:
+            continue
+        candidates = circle_candidates(frame, enforce_upper_frame=False)
+        if candidates:
+            observations.append((float(t), candidates))
+    if not observations:
+        raise RuntimeError("No circular chamber found in centred crop")
+
+    scores: list[np.ndarray] = []
+    parents: list[np.ndarray] = []
+    for index, (_, candidates) in enumerate(observations):
+        observation_score = np.asarray([
+            8.0 * candidate[3] + 0.25 * candidate[2] / 100.0
+            for candidate in candidates
+        ])
+        if index == 0:
+            scores.append(observation_score)
+            parents.append(np.full(len(candidates), -1, dtype=int))
+            continue
+        previous = observations[index - 1][1]
+        transition = np.empty((len(previous), len(candidates)), dtype=float)
+        for old_index, old in enumerate(previous):
+            for new_index, new in enumerate(candidates):
+                scale = max((old[2] + new[2]) / 2, 1)
+                centre_jump = math.hypot(old[0] - new[0], old[1] - new[1]) / scale
+                radius_jump = abs(math.log(max(new[2], 1) / max(old[2], 1)))
+                transition[old_index, new_index] = 2.5 * centre_jump + 3.0 * radius_jump
+        totals = scores[-1][:, None] - transition
+        best_parent = np.argmax(totals, axis=0)
+        scores.append(observation_score + totals[best_parent, np.arange(len(candidates))])
+        parents.append(best_parent)
+
+    chosen = int(np.argmax(scores[-1]))
+    path: list[tuple[float, tuple[int, int, int]]] = []
+    for index in range(len(observations) - 1, -1, -1):
+        t, candidates = observations[index]
+        path.append((t, tuple(candidates[chosen][:3])))
+        if index:
+            chosen = int(parents[index][chosen])
+    return list(reversed(path))
 
 
 def split_lower_by_y(ys: np.ndarray, iterations: int = 12) -> np.ndarray:
@@ -723,8 +785,12 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
     if clip.duration_hint and abs(duration - clip.duration_hint) > 3:
         raise RuntimeError(f"{clip.name}: duration {duration:.2f}s does not match {clip.duration_hint:.2f}s")
     cap = cv2.VideoCapture(str(path))
-    track = ([(0.0, clip.fixed_circle), (duration, clip.fixed_circle)]
-             if clip.fixed_circle is not None else circle_track(cap, duration))
+    if clip.fixed_circle is not None:
+        track = [(0.0, clip.fixed_circle), (duration, clip.fixed_circle)]
+    elif clip.centered_crop:
+        track = centered_crop_circle_track(cap, duration)
+    else:
+        track = circle_track(cap, duration)
     # All user-timed 90-degree recordings were visually verified with the flame
     # above the droplet. Semantic orientation must never be inferred from color
     # area because a reacted droplet can be larger/more chromatic than the flame.
@@ -1099,8 +1165,9 @@ def main() -> None:
                 # User-provided cropped videos are already flame-up and have a
                 # different pixel coordinate system from the original fixed ROI.
                 source_clip = replace(clip, name=cropped_name,
-                                      orientation_quarters=0, fixed_circle=None)
-            source_tag = ".cropped-v1" if source_name == cropped_name else ""
+                                      orientation_quarters=0, fixed_circle=None,
+                                      centered_crop=True)
+            source_tag = ".cropped-v4-centered-smooth" if source_name == cropped_name else ""
             cache_identity = source_name + source_tag + (f".{clip.cache_tag}" if clip.cache_tag else "")
             safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", cache_identity) + ".csv"
             cached = clip_cache / safe_name

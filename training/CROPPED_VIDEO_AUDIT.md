@@ -21,6 +21,7 @@ cropped model was deployed to the browser application.
 |---|---:|---:|---:|---:|
 | Original | 46.1% | 87.5% | 36.9% | 66.1% |
 | Cropped replaces original | 40.0% | 85.8% | 27.8% | 52.8% |
+| Cropped + centred smooth chamber track | 40.4% | 92.0% | 23.2% | 40.5% |
 | Original + cropped augmentation | 33.2% | 78.4% | 28.3% | 51.6% |
 
 Within-run block scores increased for the replacement experiment (H2 exact
@@ -42,3 +43,20 @@ revision must first map every frame into one canonical sample coordinate system
 using stable sample/chamber landmarks. Concentration features can then be
 re-extracted from the flame mask for H2 and the droplet mask for RH and evaluated
 again with whole-run held-out validation.
+
+## Centred-crop geometry revision
+
+The original detector rejects candidates whose centre is below 50% of the frame.
+That prior is useful for the uncropped phone composition but invalid for these
+user-centred crops, and it assigned a zero score to several real apertures. Crop
+mode now removes that prior and selects a temporally smooth candidate path rather
+than making independent per-probe choices.
+
+This reduced circle-radius spans from 39 to 9 px in `H2_only_test_2`, from 64 to
+9 px in `H2O_only_2_extract`, and from 45 to 10 px in `H2_only_4`. The H2
+within-one-stage held-out result improved to 92.0%, but exact and stage-balanced
+accuracy remained below the original model. RH remained worse despite the
+geometric improvement. Therefore the revision is retained for crop QA and
+feature experiments, but concentration deployment remains unchanged. The RH
+failure after stable geometry points to cross-run optical response or timeline
+agreement as the next bottleneck rather than chamber localisation.
