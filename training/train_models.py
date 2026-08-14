@@ -13,7 +13,7 @@ import csv
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -1067,6 +1067,10 @@ def main() -> None:
     parser.add_argument("--cache", type=Path, default=Path(f"training/cache/{CACHE_VERSION}/features.csv"))
     parser.add_argument("--reuse-cache", action="store_true")
     parser.add_argument(
+        "--prefer-cropped", action="store_true",
+        help="use <original-stem>_cropped.mp4 when present while preserving logical timelines",
+    )
+    parser.add_argument(
         "--features-only", action="store_true",
         help="refresh the calibrated feature cache without replacing deployed models",
     )
@@ -1087,14 +1091,24 @@ def main() -> None:
         rows = []
         clip_cache = args.cache.parent / "clips"
         for clip in clips:
-            cache_identity = clip.name + (f".{clip.cache_tag}" if clip.cache_tag else "")
+            source_clip = clip
+            source_name = clip.name
+            cropped_name = Path(clip.name).stem + "_cropped.mp4"
+            if args.prefer_cropped and (args.video_root / cropped_name).exists():
+                source_name = cropped_name
+                # User-provided cropped videos are already flame-up and have a
+                # different pixel coordinate system from the original fixed ROI.
+                source_clip = replace(clip, name=cropped_name,
+                                      orientation_quarters=0, fixed_circle=None)
+            source_tag = ".cropped-v1" if source_name == cropped_name else ""
+            cache_identity = source_name + source_tag + (f".{clip.cache_tag}" if clip.cache_tag else "")
             safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", cache_identity) + ".csv"
             cached = clip_cache / safe_name
             if cached.exists():
                 clip_rows = relabel_rows(read_csv(cached), clip)
                 print(f"{clip.name}: loaded {len(clip_rows)} cached frames")
             else:
-                clip_rows = relabel_rows(sample_clip(args.video_root, clip, args.sample_hz), clip)
+                clip_rows = relabel_rows(sample_clip(args.video_root, source_clip, args.sample_hz), clip)
                 write_csv(cached, clip_rows)
             rows.extend(clip_rows)
         rows = apply_shared_baselines(rows)
