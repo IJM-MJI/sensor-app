@@ -75,7 +75,9 @@ H2의 긴 4% hold가 전체 점수를 부풀리는지 확인하기 위해 Reacti
 
 사용자가 정렬한 `_cropped` 영상은 원 타임라인을 유지한 별도 cache로 A/B 평가할 수 있습니다. 단순 원본 대체와 원본+crop 증강은 동일 run 블록 점수는 높였지만 독립 영상 held-out 점수를 낮춰 배포하지 않았습니다. 상세 수치와 원 검출 기하 문제는 [`training/CROPPED_VIDEO_AUDIT.md`](training/CROPPED_VIDEO_AUDIT.md)에 기록했습니다.
 
-정규화된 단독 조건 endpoint의 run 간 색 궤적 감사는 [`training/audit_single_condition_trajectories.py`](training/audit_single_condition_trajectories.py)로 수행합니다. 같은 명목 농도가 다른 run에서도 같은 LAB 위치에 놓이는 비율은 H2 28.0%, RH 26.5%였지만, 다수 run 내부에서는 농도 증가에 따른 반응 크기 순서가 유지됐습니다. 이는 타임라인 전체 오류보다 run별 광학 경로 차이와 빠른 ramp endpoint 압축이 정확 단계 일반화의 병목이라는 뜻입니다. 상세 해석과 검토 대상은 [`training/SINGLE_CONDITION_TRAJECTORY_AUDIT.md`](training/SINGLE_CONDITION_TRAJECTORY_AUDIT.md)에 기록했습니다.
+정규화된 단독 조건 endpoint의 run 간 색 궤적 감사는 [`training/audit_single_condition_trajectories.py`](training/audit_single_condition_trajectories.py)로 수행합니다. 같은 명목 농도가 다른 run에서도 같은 LAB 위치에 놓이는 최신 비율은 H2 32.0%, RH 26.5%였지만, 다수 run 내부에서는 농도 증가에 따른 반응 크기 순서가 유지됐습니다. 이는 타임라인 전체 오류보다 run별 광학 경로 차이와 빠른 ramp endpoint 압축이 정확 단계 일반화의 병목이라는 뜻입니다. 상세 해석과 검토 대상은 [`training/SINGLE_CONDITION_TRAJECTORY_AUDIT.md`](training/SINGLE_CONDITION_TRAJECTORY_AUDIT.md)에 기록했습니다.
+
+`1_90_H2_only_5_cropped.mp4`를 포함한 최신 H2 crop 평가는 정확 단계 43.3%, ±1단계 95.5%, MAE 0.61%p입니다. RH20 simultaneous 네 run은 H2 0%/4% endpoint와 낮은 가중치의 내부 순서 정보로만 훈련에 추가하고 기존 H2-only 다섯 run에서만 평가합니다. 이 weak-data A/B는 정확 46.2%, stage-balanced 44.6%, ±1단계 97.5%, MAE 0.56%p로 큰 오차를 줄였지만 정확도와 stage-balanced가 함께 개선되지 않아 배포하지 않았습니다. 실제 픽셀 마스크를 읽는 방법과 발견된 RH 배경 혼입은 [`training/ENDPOINT_MASK_REVIEW_GUIDE.md`](training/ENDPOINT_MASK_REVIEW_GUIDE.md)에 설명했습니다.
 
 Calibration 프레임에서 불꽃/물방울 픽셀을 완전히 고정하는 방식도 별도로 시험했습니다. RH 70--90% 회귀 오차는 4.97%p로 감소했지만 4상태 balanced accuracy가 70.1%에서 60.1%로 낮아지고 전체 농도 단계 오차가 증가해 채택하지 않았습니다. 다음 추출기는 원 위치를 유지하되 촬영 중의 미세 회전·이동을 먼저 정합한 뒤 고정 마스크를 적용해야 합니다.
 

@@ -25,7 +25,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedGroupKFold
 
-from train_models import CACHE_VERSION, read_csv
+from train_models import CACHE_VERSION, read_csv, simultaneous_clips
 
 
 TASKS = {
@@ -92,13 +92,15 @@ class OrdinalLogistic(BaseEstimator, ClassifierMixin):
     def __init__(self, C=.5):
         self.C = C
 
-    def fit(self, x, y):
+    def fit(self, x, y, sample_weight=None):
         self.classes_ = np.asarray(sorted(set(y)), dtype=float)
         self.models_ = []
         for threshold in self.classes_[1:]:
             model = make_pipeline(StandardScaler(), LogisticRegression(
                 C=self.C, max_iter=3000, class_weight="balanced", random_state=42))
-            model.fit(x, np.asarray(y) >= threshold)
+            fit_kwargs = ({"logisticregression__sample_weight": sample_weight}
+                          if sample_weight is not None else {})
+            model.fit(x, np.asarray(y) >= threshold, **fit_kwargs)
             self.models_.append(model)
         return self
 
@@ -136,12 +138,14 @@ class ResponseThenStage(BaseEstimator, ClassifierMixin):
             min_samples_leaf=self.min_samples_leaf, class_weight="balanced",
             random_state=42, n_jobs=-1)
 
-    def fit(self, x, y):
+    def fit(self, x, y, sample_weight=None):
         self.classes_ = np.asarray(sorted(set(y)), dtype=float)
         self.baseline_ = self.classes_[0]
         response = np.asarray(y) != self.baseline_
-        self.gate_ = self._forest().fit(x, response)
-        self.stage_ = self._forest().fit(np.asarray(x)[response], np.asarray(y)[response])
+        self.gate_ = self._forest().fit(x, response, sample_weight=sample_weight)
+        stage_weight = None if sample_weight is None else np.asarray(sample_weight)[response]
+        self.stage_ = self._forest().fit(
+            np.asarray(x)[response], np.asarray(y)[response], sample_weight=stage_weight)
         return self
 
     def predict_proba(self, x):
@@ -216,6 +220,33 @@ def assign_rh_ramp_targets(rows):
         row["rh_analysis_stage"] = float(levels[np.argmin(np.abs(levels - continuous))])
 
 
+def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
+    """Use simultaneous RH20 as H2-only ordered/range supervision.
+
+    Reaction boundaries establish H2 0% and 4%. Interior percentages are only a
+    linear progress proxy, so these rows may train but must never be scored as
+    exact held-out ground truth.
+    """
+    clips = {clip.name: clip for clip in simultaneous_clips() if clip.rh == 20}
+    for row in rows:
+        clip = clips.get(str(row["video"]))
+        if clip is None or clip.reaction_end is None:
+            continue
+        time = float(row["time"])
+        if time < clip.reaction_start or time > clip.reaction_end:
+            continue
+        progress = np.clip(
+            (time - clip.reaction_start) / max(clip.reaction_end - clip.reaction_start, 1e-6), 0, 1)
+        continuous = float(4 * progress)
+        row["h2_value"] = continuous
+        row["continuous_target"] = continuous
+        row["analysis_stage"] = float(np.clip(np.floor(continuous + .5), 0, 4))
+        row["analysis_phase"] = "reaction"
+        row["weak_supervision"] = True
+        endpoint_distance = min(time - clip.reaction_start, clip.reaction_end - time)
+        row["sample_weight_factor"] = 1.0 if endpoint_distance <= 1.0 else float(interior_weight)
+
+
 def add_stability(rows):
     by_video = defaultdict(list)
     for row in rows:
@@ -258,7 +289,7 @@ def augment(row, region):
         # video-held-out tests, so only this independently useful compact subset
         # is exposed to the concentration model.
         chroma_suffixes = [f"chroma_p{percentile}" for percentile in (10, 25, 50, 75, 90)]
-        if all(f"flame_{suffix}" in row for suffix in chroma_suffixes):
+        if all(row.get(f"flame_{suffix}") not in (None, "") for suffix in chroma_suffixes):
             output.extend(float(row[f"flame_{suffix}"]) for suffix in chroma_suffixes)
     return output
 
@@ -294,6 +325,15 @@ def balanced_sample_weight(y, levels):
     return np.asarray([len(y) / max(len(levels) * counts[value], 1) for value in y])
 
 
+def weak_fit_kwargs(estimator, sample_weight):
+    """Route weak-supervision weights through sklearn pipelines/custom models."""
+    if isinstance(estimator, (OrdinalLogistic, ResponseThenStage)):
+        return {"sample_weight": sample_weight}
+    if hasattr(estimator, "steps"):
+        return {f"{estimator.steps[-1][0]}__sample_weight": sample_weight}
+    return {"sample_weight": sample_weight}
+
+
 def export_regression_tree(tree):
     source = tree.tree_
     return {
@@ -327,6 +367,7 @@ def fit_and_export(rows, task, config, selected):
     fit_kwargs = {}
     if selected.endswith("rounded"):
         weights = balanced_sample_weight(y, np.asarray(config["levels"], dtype=float))
+        weights *= np.asarray([float(row.get("sample_weight_factor", 1.0)) for row in rows])
         if hasattr(estimator, "steps"):
             fit_kwargs[f"{estimator.steps[-1][0]}__sample_weight"] = weights
         else:
@@ -364,30 +405,42 @@ def evaluate(rows, config, estimator, name, protocol="video_holdout"):
     x = np.asarray([augment(row, config["region"]) for row in rows])
     y = np.asarray([target_value(row, config) for row in rows])
     groups = np.asarray([str(row["group"]) for row in rows])
+    strong = np.asarray([not bool(row.get("weak_supervision", False)) for row in rows])
     prediction = np.full(len(y), np.nan)
     confidence = np.full(len(y), np.nan)
     if protocol == "video_holdout":
-        splits = [(groups != group, groups == group) for group in sorted(set(groups))]
+        splits = [((groups != group) | ~strong, (groups == group) & strong)
+                  for group in sorted(set(groups[strong]))]
     elif protocol == "within_run_blocks":
         # Five-second blocks prevent adjacent frames from being split individually,
         # while retaining the calibration/domain information from each recording.
-        blocks = np.asarray([f"{row['video']}::{int(float(row['time']) // 5)}" for row in rows])
+        strong_index = np.where(strong)[0]
+        blocks = np.asarray([f"{rows[index]['video']}::{int(float(rows[index]['time']) // 5)}"
+                             for index in strong_index])
         splitter = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=42)
-        splits = list(splitter.split(x, y, groups=blocks))
+        splits = []
+        for train_local, test_local in splitter.split(x[strong], y[strong], groups=blocks):
+            train = ~strong.copy(); test = np.zeros(len(rows), dtype=bool)
+            train[strong_index[train_local]] = True
+            test[strong_index[test_local]] = True
+            splits.append((train, test))
     else:
         raise ValueError(protocol)
     for train, test in splits:
         fitted = clone(estimator)
         fit_kwargs = {}
+        weak_weight = np.asarray([
+            float(rows[index].get("sample_weight_factor", 1.0)) for index in np.where(train)[0]
+        ])
         if name.endswith("rounded"):
             counts = {level: int(np.sum(y[train] == level)) for level in levels}
             sample_weight = np.asarray([
                 len(train) / max(len(levels) * counts[value], 1) for value in y[train]
             ])
-            if hasattr(fitted, "steps"):
-                fit_kwargs[f"{fitted.steps[-1][0]}__sample_weight"] = sample_weight
-            else:
-                fit_kwargs["sample_weight"] = sample_weight
+            sample_weight *= weak_weight
+            fit_kwargs = weak_fit_kwargs(fitted, sample_weight)
+        elif np.any(weak_weight != 1.0):
+            fit_kwargs = weak_fit_kwargs(fitted, weak_weight)
         fitted.fit(x[train], y[train], **fit_kwargs)
         if name.endswith("rounded"):
             raw = np.asarray(fitted.predict(x[test])).reshape(-1)
@@ -403,10 +456,11 @@ def evaluate(rows, config, estimator, name, protocol="video_holdout"):
             prediction[test] = direct
             confidence[test] = probability[np.arange(len(best)), best]
     step = float(np.median(np.diff(levels)))
+    evaluated = strong & ~np.isnan(prediction)
     level_distance = np.abs(prediction - y) / step
     per_video = []
-    for group in sorted(set(groups)):
-        use = groups == group
+    for group in sorted(set(groups[strong])):
+        use = (groups == group) & evaluated
         per_video.append({
             "group": group, "n": int(use.sum()),
             "exact_accuracy": float(np.mean(prediction[use] == y[use])),
@@ -415,21 +469,23 @@ def evaluate(rows, config, estimator, name, protocol="video_holdout"):
         })
     metric = {
         "protocol": "calibration_aware_video_holdout" if protocol == "video_holdout" else protocol,
-        "exact_accuracy": float(np.mean(prediction == y)),
-        "within_one_step": float(np.mean(level_distance <= 1)),
-        "mae": float(np.mean(np.abs(prediction - y))),
+        "exact_accuracy": float(np.mean(prediction[evaluated] == y[evaluated])),
+        "within_one_step": float(np.mean(level_distance[evaluated] <= 1)),
+        "mae": float(np.mean(np.abs(prediction[evaluated] - y[evaluated]))),
         "video_macro_exact_accuracy": float(np.mean([row["exact_accuracy"] for row in per_video])),
         "video_macro_within_one_step": float(np.mean([row["within_one_step"] for row in per_video])),
         "video_macro_mae": float(np.mean([row["mae"] for row in per_video])),
-        "n_frames": len(y), "n_videos": len(per_video), "per_video": per_video,
-        "confusion": confusion_matrix(y, prediction, labels=levels).tolist(),
+        "n_frames": int(evaluated.sum()), "n_videos": len(per_video), "per_video": per_video,
+        "n_weak_training_frames": int((~strong).sum()),
+        "confusion": confusion_matrix(y[evaluated], prediction[evaluated], labels=levels).tolist(),
     }
     cm = np.asarray(metric["confusion"], dtype=float)
     metric["stage_balanced_accuracy"] = float(np.mean(np.diag(cm) / np.maximum(cm.sum(axis=1), 1)))
     predictions = [{
         "video": row["video"], "group": group, "time": row["time"],
         "reference": float(truth), "prediction": float(estimate), "confidence": float(conf),
-    } for row, group, truth, estimate, conf in zip(rows, groups, y, prediction, confidence)]
+    } for row, group, truth, estimate, conf, keep in zip(rows, groups, y, prediction, confidence, evaluated)
+       if keep]
     return metric, predictions
 
 
@@ -522,6 +578,10 @@ def main():
                         default=Path("training/output/ordinal_concentration"))
     parser.add_argument("--no-deploy", action="store_true",
                         help="evaluate without replacing sensor-concentration-model.js")
+    parser.add_argument("--include-rh20-h2", action="store_true",
+                        help="add RH20 simultaneous reactions as weak H2 0-to-4 supervision")
+    parser.add_argument("--rh20-interior-weight", type=float, default=.25,
+                        help="training weight for uncertain RH20 ramp-interior stages")
     args = parser.parse_args()
     output = args.output
     output.mkdir(parents=True, exist_ok=True)
@@ -531,9 +591,12 @@ def main():
     add_stability(rows)
     assign_h2_ramp_targets(rows)
     assign_rh_ramp_targets(rows)
+    if args.include_rh20_h2:
+        assign_rh20_h2_weak_targets(rows, args.rh20_interior_weight)
     reports, paths, all_predictions, deployed_models = {}, {}, [], {}
     for task, config in TASKS.items():
-        task_rows = [row for row in rows if row["kind"] == config["kind"]
+        task_rows = [row for row in rows
+                     if (row["kind"] == config["kind"] or (task == "H2" and row.get("weak_supervision")))
                      and row.get(config["label"]) is not None]
         if task == "H2":
             # The application reports exposure response, not a concentration
@@ -541,7 +604,7 @@ def main():
             # only two independent runs, so it must not supervise H2 quantitation.
             task_rows = [row for row in task_rows
                          if "analysis_stage" in row and row.get("analysis_phase") == "reaction"]
-        paths[task] = colour_path(task_rows, config)
+        paths[task] = colour_path([row for row in task_rows if not row.get("weak_supervision")], config)
         models, predictions, within_run_models, within_run_predictions = {}, {}, {}, {}
         for name, estimator in candidates().items():
             models[name], predictions[name] = evaluate(task_rows, config, estimator, name, "video_holdout")

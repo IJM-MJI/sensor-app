@@ -136,6 +136,8 @@ def simultaneous_clips() -> list[Clip]:
                 reaction_end=reaction,
                 duration_hint=duration,
                 rh=float(rh),
+                minimum_sample_hz=2.0 if rh == 20 else 0.0,
+                cache_tag="rh20-h2-quant-v1" if rh == 20 else "",
             ))
     return clips
 
@@ -614,10 +616,13 @@ def lock_orientation(
     return chosen, float(votes[chosen] / votes.sum())
 
 
-def masked_shape_pixels(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) -> np.ndarray:
-    pixels = lab[zone]
+def shape_pixel_mask(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) -> np.ndarray:
+    """Return the exact high-distance pixels used for one sensing shape."""
+    ys, xs = np.where(zone)
+    pixels = lab[ys, xs]
+    output = np.zeros(zone.shape, dtype=bool)
     if len(pixels) < 20:
-        return np.repeat(background[None, :], 20, axis=0)
+        return output
     distance = np.sqrt(
         (.35 * (pixels[:, 0] - background[0])) ** 2
         + (pixels[:, 1] - background[1]) ** 2
@@ -626,8 +631,18 @@ def masked_shape_pixels(lab: np.ndarray, zone: np.ndarray, background: np.ndarra
     cutoff = max(6.0, float(np.percentile(distance, 65)))
     shape = pixels[distance >= cutoff]
     if len(shape) < 12:
-        shape = pixels[np.argsort(distance)[-max(12, len(pixels) // 5):]]
-    return shape
+        selected = np.argsort(distance)[-max(12, len(pixels) // 5):]
+    else:
+        selected = np.where(distance >= cutoff)[0]
+    output[ys[selected], xs[selected]] = True
+    return output
+
+
+def masked_shape_pixels(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) -> np.ndarray:
+    selected = shape_pixel_mask(lab, zone, background)
+    if not np.any(selected):
+        return np.repeat(background[None, :], 20, axis=0)
+    return lab[selected]
 
 
 def shape_summary(shape: np.ndarray, prefix: str) -> tuple[np.ndarray, dict[str, float]]:

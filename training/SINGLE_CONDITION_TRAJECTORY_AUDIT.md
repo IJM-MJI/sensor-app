@@ -18,7 +18,7 @@ hint, not an automatic replacement label.
 
 | Task | Endpoint run/stages | Same-stage optical matches | Matching rate |
 |---|---:|---:|---:|
-| H2-only | 25 | 7 | 28.0% |
+| H2-only | 25 | 8 | 32.0% |
 | H2O-only | 34 | 9 | 26.5% |
 
 These are cross-run trajectory agreement rates, not application accuracy. The
@@ -27,8 +27,8 @@ one run but fails on a held-out recording.
 
 Within each run, response magnitude still usually increases with concentration:
 
-- H2 progress correlation: daylight-5 0.80, indoor-4 0.90, test-2 0.90,
-  test-3 0.30, test-indoor 0.60.
+- H2 progress correlation: daylight-5 0.60, indoor-4 0.90, test-2 0.90,
+  test-3 0.90, test-indoor 0.40.
 - RH progress correlation: daylight recovery 0.89, indoor long 0.94,
   indoor fast 0.54, response-3 0.61, response-6 0.61.
 
@@ -38,14 +38,15 @@ fast response recordings contain non-monotonic intermediate endpoints.
 
 ## Highest-priority review findings
 
-- `H2_only_test_3`: endpoint H2 4% at about 151.5 s is optically closest to the
-  leave-one-run-out H2 0% consensus. Its within-run magnitude also saturates
-  after H2 1%, so this run needs frame-level verification before exact training.
+- `H2_only_test_3`: after all five H2 runs use the same crop domain, its
+  within-run progression rises to 0.90. Cross-run colours still overlap other
+  stages, but the earlier apparent endpoint reversal was partly a domain-scale
+  artifact rather than a reason to relabel the timeline.
 - `H2_only_4`: endpoints H2 2--4% do progress within the run, but their absolute
   path lies near other runs' low-stage colours.
-- `H2_only_5`: it is the only quantitative H2 run without a matching `_cropped`
-  source. It remains useful as an independent daylight run, but its scale/domain
-  differs visibly from the centred crops and should not be silently removed.
+- `H2_only_5`: a matching `_cropped` source was supplied after the first audit.
+  Cross-run endpoint agreement increased from 7/25 to 8/25 and its within-run
+  progress correlation is now 0.60. It remains a valuable daylight holdout.
 - `H2O_only_2_extract` (indoor fast): RH40 responds strongly, the intermediate
   RH50--80 endpoints compress, and RH90 moves again. Exact 10% stages are not a
   single monotonic colour path in this run.

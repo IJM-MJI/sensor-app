@@ -22,6 +22,7 @@ cropped model was deployed to the browser application.
 | Original | 46.1% | 87.5% | 36.9% | 66.1% |
 | Cropped replaces original | 40.0% | 85.8% | 27.8% | 52.8% |
 | Cropped + centred smooth chamber track | 40.4% | 92.0% | 23.2% | 40.5% |
+| Centred track + new H2-only-5 crop | 43.3% | 95.5% | 23.2% | 40.5% |
 | Original + cropped augmentation | 33.2% | 78.4% | 28.3% | 51.6% |
 
 Within-run block scores increased for the replacement experiment (H2 exact
@@ -60,3 +61,8 @@ geometric improvement. Therefore the revision is retained for crop QA and
 feature experiments, but concentration deployment remains unchanged. The RH
 failure after stable geometry points to cross-run optical response or timeline
 agreement as the next bottleneck rather than chamber localisation.
+
+The later `1_90_H2_only_5_cropped.mp4` addition removed the last H2 run's large
+scale/domain mismatch. Its chamber track is stable (median resized circle
+`(251, 99, 106)`), and H2 gross-error metrics improved as shown above. It does
+not by itself make exact concentration accuracy sufficient for deployment.
