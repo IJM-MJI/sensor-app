@@ -21,6 +21,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.ensemble import ExtraTreesClassifier, ExtraTreesRegressor, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import confusion_matrix
+from sklearn.isotonic import IsotonicRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedGroupKFold
@@ -222,7 +223,7 @@ def assign_rh_ramp_targets(rows):
         row["rh_analysis_stage"] = float(levels[np.argmin(np.abs(levels - continuous))])
 
 
-def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
+def assign_rh20_h2_weak_targets(rows, interior_weight=.25, progress_mode="time"):
     """Use simultaneous RH20 as H2-only ordered/range supervision.
 
     Reaction boundaries establish H2 0% and 4%. Interior percentages are only a
@@ -256,6 +257,41 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
     # its x2 export at the same playback sampling rate. Preserve those extra
     # time points without letting one experimental run receive double weight.
     density_weight = {"1_90_RH20_cropped.mp4": .5}
+    optical_progress = {}
+    if progress_mode == "optical":
+        # Infer only the order within each reaction. Endpoints still come from
+        # the independently matched test_2 optical maximum above.
+        optical_features = [
+            "flame_L", "flame_a", "flame_b", "flame_chroma_p25",
+            "flame_chroma_p50", "flame_chroma_p75",
+        ]
+        for video in optical_max:
+            reaction_start, reaction_end = ramps[video]
+            selected = sorted(
+                [row for row in rows if str(row["video"]) == video
+                 and reaction_start <= float(row["time"]) <= reaction_end],
+                key=lambda row: float(row["time"]))
+            if len(selected) < 12:
+                continue
+            x = np.asarray([[float(row[name]) for name in optical_features] for row in selected])
+            window = max(5, min(15, len(selected) // 10))
+            start_value = np.median(x[:window], axis=0)
+            end_value = np.median(x[-window:], axis=0)
+            scale = np.maximum(np.percentile(np.abs(x - np.median(x, axis=0)), 75, axis=0), .25)
+            direction = (end_value - start_value) / scale
+            denominator = max(float(direction @ direction), 1e-9)
+            raw = ((x - start_value) / scale) @ direction / denominator
+            # Median smoothing rejects isolated camera/exposure fluctuations;
+            # isotonic regression enforces the known rising-reaction order.
+            padded = np.pad(raw, (4, 4), mode="edge")
+            filtered = np.asarray([np.median(padded[index:index + 9])
+                                   for index in range(len(raw))])
+            monotonic = IsotonicRegression(increasing=True, out_of_bounds="clip").fit_transform(
+                np.arange(len(filtered)), filtered)
+            low, high = np.percentile(monotonic, [5, 95])
+            progress = np.clip((monotonic - low) / max(high - low, 1e-6), 0, 1)
+            optical_progress.update({(video, float(row["time"])): float(value)
+                                     for row, value in zip(selected, progress)})
     for row in rows:
         ramp = ramps.get(str(row["video"]))
         if ramp is None:
@@ -264,8 +300,10 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
         reaction_start, reaction_end = ramp
         if time < reaction_start or time > reaction_end:
             continue
-        progress = np.clip(
-            (time - reaction_start) / max(reaction_end - reaction_start, 1e-6), 0, 1)
+        progress = optical_progress.get(
+            (str(row["video"]), time),
+            float(np.clip((time - reaction_start) /
+                          max(reaction_end - reaction_start, 1e-6), 0, 1)))
         continuous = float(optical_max.get(str(row["video"]), 4.0) * progress)
         row["h2_value"] = continuous
         row["continuous_target"] = continuous
@@ -631,6 +669,8 @@ def main():
                         help="add RH20 simultaneous reactions as weak H2 0-to-4 supervision")
     parser.add_argument("--rh20-interior-weight", type=float, default=.25,
                         help="training weight for uncertain RH20 ramp-interior stages")
+    parser.add_argument("--rh20-progress-mode", choices=("time", "optical"), default="time",
+                        help="assign cropped RH20 interior order by time or within-run optical path")
     parser.add_argument("--replace-rh20-with-augment", action="store_true",
                         help="remove original RH20 clips before appending cropped replacements")
     parser.add_argument("--retain-original-rh20-starts", action="store_true",
@@ -658,7 +698,8 @@ def main():
     assign_h2_ramp_targets(rows)
     assign_rh_ramp_targets(rows)
     if args.include_rh20_h2:
-        assign_rh20_h2_weak_targets(rows, args.rh20_interior_weight)
+        assign_rh20_h2_weak_targets(
+            rows, args.rh20_interior_weight, args.rh20_progress_mode)
     reports, paths, all_predictions, deployed_models = {}, {}, [], {}
     for task, config in TASKS.items():
         task_rows = [row for row in rows
