@@ -79,6 +79,8 @@ H2의 긴 4% hold가 전체 점수를 부풀리는지 확인하기 위해 Reacti
 
 `1_90_H2_only_5_cropped.mp4`를 포함한 최신 H2 crop 평가는 정확 단계 43.3%, ±1단계 95.5%, MAE 0.61%p입니다. RH20 simultaneous 네 run은 H2 0%/4% endpoint와 낮은 가중치의 내부 순서 정보로만 훈련에 추가하고 기존 H2-only 다섯 run에서만 평가합니다. 이 weak-data A/B는 정확 46.2%, stage-balanced 44.6%, ±1단계 97.5%, MAE 0.56%p로 큰 오차를 줄였지만 정확도와 stage-balanced가 함께 개선되지 않아 배포하지 않았습니다. 실제 픽셀 마스크를 읽는 방법과 발견된 RH 배경 혼입은 [`training/ENDPOINT_MASK_REVIEW_GUIDE.md`](training/ENDPOINT_MASK_REVIEW_GUIDE.md)에 설명했습니다.
 
+기울어진 response 영상에서 불꽃 하단이 물방울 마스크에 들어가던 오류는 두 검색 영역의 경계를 실제 도형 사이 빈 공간으로 이동해 수정했습니다. 수정 후 H2 whole-video held-out은 정확 44.5%, stage-balanced 48.5%, ±1단계 96.2%, MAE 0.60%p로 모두 개선됐습니다. RH exact는 23.8%로 소폭 올랐지만 ±1단계와 MAE가 악화되어 RH 모델과 앱 배포 파일은 아직 교체하지 않았습니다.
+
 Calibration 프레임에서 불꽃/물방울 픽셀을 완전히 고정하는 방식도 별도로 시험했습니다. RH 70--90% 회귀 오차는 4.97%p로 감소했지만 4상태 balanced accuracy가 70.1%에서 60.1%로 낮아지고 전체 농도 단계 오차가 증가해 채택하지 않았습니다. 다음 추출기는 원 위치를 유지하되 촬영 중의 미세 회전·이동을 먼저 정합한 뒤 고정 마스크를 적용해야 합니다.
 
 ## 주의 사항

@@ -690,8 +690,11 @@ def extract_features(
     # Coordinates were normalized before patch balancing so both the reference
     # rectangles and sensing-shape masks share exactly the same geometry.
     central_x = (nx >= -.55) & (nx <= .35)
-    flame_zone = mask & central_x & (ny >= -.62) & (ny <= -.02)
-    drop_zone = mask & central_x & (ny >= .02) & (ny <= .68)
+    # Leave the boundary in the physical gap between the two printed shapes.
+    # The earlier zero-centred split clipped the long lower tip of tilted flames
+    # (notably RH response runs) and incorrectly fed it to the droplet region.
+    flame_zone = mask & central_x & (ny >= -.62) & (ny <= .14)
+    drop_zone = mask & central_x & (ny >= .18) & (ny <= .68)
     flame, flame_stats = shape_summary(masked_shape_pixels(lab, flame_zone, bg), "flame")
     drop, drop_stats = shape_summary(masked_shape_pixels(lab, drop_zone, bg), "drop")
     return {
@@ -1182,7 +1185,8 @@ def main() -> None:
                 source_clip = replace(clip, name=cropped_name,
                                       orientation_quarters=0, fixed_circle=None,
                                       centered_crop=True)
-            source_tag = ".cropped-v4-centered-smooth" if source_name == cropped_name else ""
+            source_tag = ".cropped-v4-centered-smooth.fixed-boundary-v2" \
+                if source_name == cropped_name else ".fixed-boundary-v2"
             cache_identity = source_name + source_tag + (f".{clip.cache_tag}" if clip.cache_tag else "")
             safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", cache_identity) + ".csv"
             cached = clip_cache / safe_name

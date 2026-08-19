@@ -41,8 +41,8 @@ def masks_for(frame: np.ndarray, row: dict[str, object]):
     chroma = np.hypot(chamber_pixels[:, 1] - 128, chamber_pixels[:, 2] - 128)
     background = chamber_pixels[np.argsort(chroma)[:max(1, len(chroma) // 2)]].mean(axis=0)
     central = (nx >= -.55) & (nx <= .35)
-    flame_zone = chamber & central & (ny >= -.62) & (ny <= -.02)
-    drop_zone = chamber & central & (ny >= .02) & (ny <= .68)
+    flame_zone = chamber & central & (ny >= -.62) & (ny <= .14)
+    drop_zone = chamber & central & (ny >= .18) & (ny <= .68)
     return flame_zone, drop_zone, shape_pixel_mask(balanced, flame_zone, background), \
         shape_pixel_mask(balanced, drop_zone, background), (x, y, radius)
 
