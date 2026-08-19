@@ -81,6 +81,8 @@ Initial 대비 run-normalized 진행률 분석과 사용 데이터는 [`training
 
 `H2_only_test_2` 한 영상의 색 궤적을 기준으로 다른 H2-only 영상을 타임라인 없이 매칭하고, RH도 긴 indoor H2O-only 궤적에 같은 방식으로 연결한 실험은 [`training/CROSS_RUN_ATLAS_GUIDE.md`](training/CROSS_RUN_ATLAS_GUIDE.md)에 정리했습니다. candidate 끝점을 최고 농도로 강제하지 않아 H2 optical-equivalent 최대값은 run별 1.05–3.05%로 나타났습니다. 그러나 단일 reference의 색 좌표가 다른 run으로 충분히 일반화되지 않아 H2 endpoint exact 45.6%, RH endpoint exact 24.2%였고 고신뢰 상호 최근접 라벨도 매우 적었습니다. 따라서 자동 pseudo-label은 학습·앱에 배포하지 않고 multi-run consensus atlas의 근거 자료로만 유지합니다.
 
+RH 기준을 `1_90_H2O_only_cropped.mp4`의 90→20% daylight recovery로 바꾼 A/B에서는 endpoint exact가 24.2%에서 38.7%, stage-balanced가 12.6%에서 17.0%로 개선됐습니다. 다만 indoor-fast는 여전히 20–30%에 압축되고 endpoint MAE도 17.31%RH여서 단독 기준으로 배포하지 않으며, 향후 상승 Reaction과 하강 Recovery prototype을 분리한 consensus atlas에 포함합니다.
+
 `training/inspect_reference_patches.py`는 회전 정규화 뒤 위-오른쪽과 아래-왼쪽의 흰색/회색 패치를 직접 검출해 시각 QA를 생성합니다. 이 패치는 학습 영상 촬영 안정화를 위한 것이며 실제 앱 촬영에는 없으므로 배포 입력이나 모델 특징으로 요구하지 않습니다. 패치 색을 고정 LAB 값으로 강제하는 보정은 전체 ramp 점수를 소폭 높였지만 4% endpoint를 크게 낮췄고, 패치 제거 또는 두 패치 중심 미세 정렬도 held-out 성능을 낮췄습니다. 따라서 관련 실험은 audit 코드로만 보존하며 배포 특징 추출기는 기존 중성 픽셀 보정과 원형 ROI/quarter-turn 정렬을 유지합니다.
 
 사용자가 정렬한 `_cropped` 영상은 원 타임라인을 유지한 별도 cache로 A/B 평가할 수 있습니다. 단순 원본 대체와 원본+crop 증강은 동일 run 블록 점수는 높였지만 독립 영상 held-out 점수를 낮춰 배포하지 않았습니다. 상세 수치와 원 검출 기하 문제는 [`training/CROPPED_VIDEO_AUDIT.md`](training/CROPPED_VIDEO_AUDIT.md)에 기록했습니다.

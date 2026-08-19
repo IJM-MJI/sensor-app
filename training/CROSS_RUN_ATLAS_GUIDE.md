@@ -72,3 +72,21 @@ RH daylight recovery만 역방향 경로를 허용한다. 경로의 끝은 4% �
 재현 코드는 `cross_run_atlas_analysis.py`, 결과는
 `output/cross_run_atlas_v1/{metrics.json,matches.csv,reference_atlas.csv}`와 H2/RH PNG에 있다.
 
+## Daylight recovery RH 기준 A/B
+
+사용자 요청에 따라 `1_90_H2O_only_cropped.mp4`의 90→20% recovery 전체를 단일 RH
+기준으로 다시 평가했다. 논리 영상명 `1_90_H2O_only.MOV`의 타임라인을 유지하면서 실제
+프레임은 `_cropped.mp4`를 우선 사용한다.
+
+| RH 기준 | 전체 exact | Stage-balanced | Endpoint exact | Endpoint ±1단계 | Endpoint MAE |
+|---|---:|---:|---:|---:|---:|
+| Indoor long 20–80 + response 90 | 17.3% | 12.6% | 24.2% | 50.0% | 16.83%RH |
+| Daylight recovery 90–20 | 15.3% | 17.0% | 38.7% | 54.6% | 17.31%RH |
+
+Daylight 기준은 endpoint exact와 stage-balanced를 높였고 특히 `rh-response-6`에는
+exact 61.2%, MAE 5.99%RH로 잘 맞았다. 반면 `rh-indoor-fast`는 여전히 20–30%에
+압축되고 indoor long도 최대 59.5%에 머문다. 따라서 daylight recovery는 더 나은
+reference 구성요소지만 모든 Reaction run의 단일 기준으로 곧바로 배포할 수는 없다.
+다음 consensus atlas에서는 상승/하강 방향을 별도 prototype으로 유지한다.
+
+결과 경로는 `output/cross_run_atlas_daylight_rh_v1`이다.

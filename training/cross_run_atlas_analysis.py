@@ -98,6 +98,23 @@ def build_rh_atlas(rows):
     return levels, np.asarray(features), long_rows + high_rows
 
 
+def build_rh_daylight_atlas(rows):
+    """Build the full 20--90 atlas from the user-selected recovery recording."""
+    reference = [row for row in rows if row["group"] == "rh-daylight-recovery"
+                 and row.get("rh_value") is not None]
+    for row in reference:
+        row["_reference_value"] = float(row["rh_value"])
+    levels = np.linspace(20, 90, 141)
+    features = []
+    for level in levels:
+        feature = median_near(reference, "RH", level, .3)
+        if feature is None:
+            nearest = min(reference, key=lambda row: abs(float(row["rh_value"]) - level))
+            feature = trajectory_feature(nearest, "RH")
+        features.append(feature)
+    return levels, np.asarray(features), reference
+
+
 def robust_scale(reference_features):
     differences = np.diff(reference_features, axis=0)
     scale = np.percentile(np.abs(differences), 75, axis=0)
@@ -145,18 +162,18 @@ def monotonic_match(cost, direction="up", jump_penalty=.025, start_penalty=.10):
     return indices
 
 
-def candidates(rows, task):
+def candidates(rows, task, rh_reference_group):
     if task == "H2":
         return [row for row in rows if row["kind"] == "h2_only"
                 and row["group"] != H2_REFERENCE_GROUP
                 and row.get("analysis_phase") == "reaction"]
     return [row for row in rows if row["kind"] == "rh_only"
-            and row["group"] != RH_REFERENCE_GROUP and row.get("rh_value") is not None]
+            and row["group"] != rh_reference_group and row.get("rh_value") is not None]
 
 
-def match_groups(rows, task, atlas_levels, atlas_features):
+def match_groups(rows, task, atlas_levels, atlas_features, rh_reference_group):
     by_group = defaultdict(list)
-    for row in candidates(rows, task):
+    for row in candidates(rows, task, rh_reference_group):
         by_group[str(row["group"])].append(row)
     output = []
     for group, group_rows in sorted(by_group.items()):
@@ -201,7 +218,7 @@ def nearest_stage(task, values):
     return levels[np.argmin(abs(values[:, None] - levels[None, :]), axis=1)]
 
 
-def metrics_and_plot(matches, task, output):
+def metrics_and_plot(matches, task, output, reference_group):
     levels = np.asarray(TASKS[task]["levels"], dtype=float)
     truth = nearest_stage(task, [row["hidden_timeline_value"] for row in matches])
     prediction = nearest_stage(task, [row["optical_equivalent"] for row in matches])
@@ -209,7 +226,7 @@ def metrics_and_plot(matches, task, output):
     cm = confusion_matrix(truth, prediction, labels=levels)
     recalls = np.diag(cm) / np.maximum(cm.sum(axis=1), 1)
     report = {
-        "reference": H2_REFERENCE_GROUP if task == "H2" else RH_REFERENCE_GROUP,
+        "reference": H2_REFERENCE_GROUP if task == "H2" else reference_group,
         "candidate_timeline_used_for_matching": False,
         "n_candidate_frames": len(matches), "n_candidate_groups": len(set(groups)),
         "exact_accuracy": float(np.mean(truth == prediction)),
@@ -279,18 +296,23 @@ def main():
                         default=Path(f"training/cache/{CACHE_VERSION}/features_registered_drop_v2.csv"))
     parser.add_argument("--output", type=Path,
                         default=Path("training/output/cross_run_atlas_v1"))
+    parser.add_argument("--rh-reference", choices=("indoor-long", "daylight-recovery"),
+                        default="indoor-long")
     args = parser.parse_args(); args.output.mkdir(parents=True, exist_ok=True)
     rows = read_csv(args.cache); assign_h2_ramp_targets(rows); assign_rh_ramp_targets(rows)
     all_matches, reports = [], {}
     atlas_rows = []
-    for task, builder in (("H2", build_h2_atlas), ("RH", build_rh_atlas)):
+    rh_builder = build_rh_atlas if args.rh_reference == "indoor-long" else build_rh_daylight_atlas
+    rh_reference_group = (RH_REFERENCE_GROUP if args.rh_reference == "indoor-long"
+                          else "rh-daylight-recovery")
+    for task, builder in (("H2", build_h2_atlas), ("RH", rh_builder)):
         levels, features, reference_rows = builder(rows)
         for level, feature in zip(levels, features):
             atlas_rows.append({"task": task, "reference_value": level,
                                **{f"feature_{i}": value for i, value in enumerate(feature)}})
-        matches = match_groups(rows, task, levels, features)
+        matches = match_groups(rows, task, levels, features, rh_reference_group)
         all_matches.extend(matches)
-        reports[task] = metrics_and_plot(matches, task, args.output)
+        reports[task] = metrics_and_plot(matches, task, args.output, rh_reference_group)
         reports[task]["n_reference_rows"] = len(reference_rows)
     write_csv(args.output / "reference_atlas.csv", atlas_rows)
     write_csv(args.output / "matches.csv", all_matches)
