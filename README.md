@@ -83,6 +83,8 @@ Initial 대비 run-normalized 진행률 분석과 사용 데이터는 [`training
 
 RH 기준을 `1_90_H2O_only_cropped.mp4`의 90→20% daylight recovery로 바꾼 A/B에서는 endpoint exact가 24.2%에서 38.7%, stage-balanced가 12.6%에서 17.0%로 개선됐습니다. 다만 indoor-fast는 여전히 20–30%에 압축되고 endpoint MAE도 17.31%RH여서 단독 기준으로 배포하지 않으며, 향후 상승 Reaction과 하강 Recovery prototype을 분리한 consensus atlas에 포함합니다.
 
+사용자가 추가한 네 RH20 crop run의 H2 보조 학습 A/B는 [`training/RH20_CROPPED_QUANT_AUDIT.md`](training/RH20_CROPPED_QUANT_AUDIT.md)에 기록했습니다. 같은 원본의 normal/x2 사본은 한 run으로 묶고 원본 특징과 crop 특징도 동시에 사용하지 않습니다. 모든 run 끝을 4%로 강제하면 H2 4% recall이 0%가 됐지만, `test_2` optical-equivalent 최대값까지만 약하게 학습하면 H2 1–4% balanced가 37.9%에서 50.2%, 전체 exact가 43.3%에서 48.0%, ±1단계가 91.1%에서 96.8%로 개선됐습니다. 0% recall은 악화되어 이 후보는 실제 상태 게이트와 결합한 end-to-end 검증 전까지 배포하지 않습니다.
+
 `training/inspect_reference_patches.py`는 회전 정규화 뒤 위-오른쪽과 아래-왼쪽의 흰색/회색 패치를 직접 검출해 시각 QA를 생성합니다. 이 패치는 학습 영상 촬영 안정화를 위한 것이며 실제 앱 촬영에는 없으므로 배포 입력이나 모델 특징으로 요구하지 않습니다. 패치 색을 고정 LAB 값으로 강제하는 보정은 전체 ramp 점수를 소폭 높였지만 4% endpoint를 크게 낮췄고, 패치 제거 또는 두 패치 중심 미세 정렬도 held-out 성능을 낮췄습니다. 따라서 관련 실험은 audit 코드로만 보존하며 배포 특징 추출기는 기존 중성 픽셀 보정과 원형 ROI/quarter-turn 정렬을 유지합니다.
 
 사용자가 정렬한 `_cropped` 영상은 원 타임라인을 유지한 별도 cache로 A/B 평가할 수 있습니다. 단순 원본 대체와 원본+crop 증강은 동일 run 블록 점수는 높였지만 독립 영상 held-out 점수를 낮춰 배포하지 않았습니다. 상세 수치와 원 검출 기하 문제는 [`training/CROPPED_VIDEO_AUDIT.md`](training/CROPPED_VIDEO_AUDIT.md)에 기록했습니다.

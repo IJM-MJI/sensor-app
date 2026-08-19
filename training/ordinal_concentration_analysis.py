@@ -235,6 +235,23 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
     # optically H2-only enough to provide angle-robust weak supervision. RH30+
     # remains simultaneous and is deliberately ignored for concentration.
     ramps["1_80_2.MOV"] = (8.0, 138.0)
+    # User-cropped RH20 clips retain their source timing. Run 4 is the normal-
+    # speed counterpart of the existing x2 clip, so its boundary is doubled.
+    ramps.update({
+        "1_90_RH20_2_x2_cropped.mp4": (0.0, 60.0),
+        "1_90_RH20_3_x2_cropped.mp4": (0.0, 60.0),
+        "1_90_RH20_4_cropped.mp4": (0.0, 120.0),
+        "1_90_RH20_5_x2_cropped.mp4": (0.0, 54.0),
+    })
+    # Timeline-free test_2 optical matching does not force every run to 4%.
+    # These maxima are deliberately reference-equivalent pseudo targets; the
+    # strong 0--4% endpoint truth remains confined to actual H2-only runs.
+    optical_max = {
+        "1_90_RH20_2_x2_cropped.mp4": 3.95,
+        "1_90_RH20_3_x2_cropped.mp4": 3.25,
+        "1_90_RH20_4_cropped.mp4": 2.75,
+        "1_90_RH20_5_x2_cropped.mp4": 1.0,
+    }
     for row in rows:
         ramp = ramps.get(str(row["video"]))
         if ramp is None:
@@ -245,14 +262,19 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
             continue
         progress = np.clip(
             (time - reaction_start) / max(reaction_end - reaction_start, 1e-6), 0, 1)
-        continuous = float(4 * progress)
+        continuous = float(optical_max.get(str(row["video"]), 4.0) * progress)
         row["h2_value"] = continuous
         row["continuous_target"] = continuous
         row["analysis_stage"] = float(np.clip(np.floor(continuous + .5), 0, 4))
         row["analysis_phase"] = "reaction"
         row["weak_supervision"] = True
         endpoint_distance = min(time - reaction_start, reaction_end - time)
-        row["sample_weight_factor"] = 1.0 if endpoint_distance <= 1.0 else float(interior_weight)
+        # A cropped optical maximum is itself a pseudo-label, not a gas-meter
+        # endpoint. Keep its endpoint weight weak as well.
+        if str(row["video"]) in optical_max:
+            row["sample_weight_factor"] = float(interior_weight)
+        else:
+            row["sample_weight_factor"] = 1.0 if endpoint_distance <= 1.0 else float(interior_weight)
 
 
 def add_stability(rows):
@@ -604,12 +626,29 @@ def main():
                         help="add RH20 simultaneous reactions as weak H2 0-to-4 supervision")
     parser.add_argument("--rh20-interior-weight", type=float, default=.25,
                         help="training weight for uncertain RH20 ramp-interior stages")
+    parser.add_argument("--replace-rh20-with-augment", action="store_true",
+                        help="remove original RH20 clips before appending cropped replacements")
+    parser.add_argument("--retain-original-rh20-starts", action="store_true",
+                        help="with replacement, keep only original H2=0 start anchors")
     args = parser.parse_args()
     output = args.output
     output.mkdir(parents=True, exist_ok=True)
     rows = read_csv(args.cache)
+    augment_rows = []
     for augment_cache in args.augment_cache:
-        rows.extend(read_csv(augment_cache))
+        augment_rows.extend(read_csv(augment_cache))
+    if args.replace_rh20_with_augment:
+        original_rh20 = {clip.name: float(clip.reaction_start)
+                         for clip in simultaneous_clips() if clip.rh == 20}
+        if args.retain_original_rh20_starts:
+            # Retain only the trustworthy dry/H2=0 start anchors. Interior and
+            # high endpoints come from cropped optical pseudo ramps.
+            rows = [row for row in rows
+                    if str(row["video"]) not in original_rh20
+                    or abs(float(row["time"]) - original_rh20[str(row["video"])]) <= 1.0]
+        else:
+            rows = [row for row in rows if str(row["video"]) not in original_rh20]
+    rows.extend(augment_rows)
     add_stability(rows)
     assign_h2_ramp_targets(rows)
     assign_rh_ramp_targets(rows)
