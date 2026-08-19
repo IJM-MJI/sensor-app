@@ -8,7 +8,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from train_models import FEATURE_NAMES, corrected, extract_features, recovery_tail_start, video_info, write_csv
+from train_models import (
+    FEATURE_NAMES, SHAPE_STAT_FEATURES, corrected, extract_features,
+    recovery_tail_start, video_info, write_csv,
+)
 
 
 RUNS = {
@@ -52,10 +55,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--video-root", type=Path, required=True)
     parser.add_argument("--sample-hz", type=float, default=.5)
+    parser.add_argument("--run", action="append", choices=sorted(RUNS),
+                        help="extract only the selected run; may be repeated")
+    parser.add_argument("--max-time", type=float, default=None,
+                        help="optional early stop for a targeted experiment")
     parser.add_argument("--output", type=Path, default=Path("training/cache/v7-verified-orientation-recovery-tail/angle_runs.csv"))
     args = parser.parse_args()
     combined = []
     for name, config in RUNS.items():
+        if args.run and name not in args.run:
+            continue
         path = args.video_root / name
         duration, fps, width, height = video_info(path)
         cap = cv2.VideoCapture(str(path))
@@ -66,6 +75,8 @@ def main() -> None:
         every = max(1, round(fps / args.sample_hz))
         index = 0
         while True:
+            if args.max_time is not None and index / max(fps, 1) > args.max_time:
+                break
             ok = cap.grab()
             if not ok:
                 break
@@ -73,12 +84,18 @@ def main() -> None:
                 ok, frame = cap.retrieve()
                 if ok:
                     t = index / fps
-                    values = corrected(extract_features(frame, config["circle"], orientation_lock))
+                    values = extract_features(frame, config["circle"], orientation_lock)
                     raw.append((t, values, orientation_lock, 1.0))
             index += 1
         cap.release()
         baseline_rows = [values for t, values, _, _ in raw if 0 <= t <= 6]
-        baseline = {key: float(np.median([row[key] for row in baseline_rows])) for key in FEATURE_NAMES}
+        baseline_corrected = [corrected(row) for row in baseline_rows]
+        baseline = {
+            **{key: float(np.median([row[key] for row in baseline_corrected]))
+               for key in FEATURE_NAMES},
+            **{key: float(np.median([row[key] for row in baseline_rows]))
+               for key in SHAPE_STAT_FEATURES},
+        }
         for t, values, orientation, orientation_confidence in raw:
             h2_present, rh_high, state, rh_setpoint = label_at(t, config["timeline"])
             row = {
@@ -90,7 +107,13 @@ def main() -> None:
                 "orientation_quarters": orientation,
                 "orientation_confidence": orientation_confidence,
             }
-            row.update({key: float(values[key] - baseline[key]) for key in FEATURE_NAMES})
+            corrected_values = corrected(values)
+            for key in FEATURE_NAMES:
+                row[f"baseline_{key}"] = baseline[key]
+                row[key] = float(corrected_values[key] - baseline[key])
+            for key in SHAPE_STAT_FEATURES:
+                row[f"baseline_{key}"] = baseline[key]
+                row[key] = float(values[key] - baseline[key])
             combined.append(row)
         print(
             f"{name}: extracted {len(raw)} frames, fixed ROI={config['circle']}, "

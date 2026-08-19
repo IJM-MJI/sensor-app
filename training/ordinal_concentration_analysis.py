@@ -229,23 +229,29 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
     linear progress proxy, so these rows may train but must never be scored as
     exact held-out ground truth.
     """
-    clips = {clip.name: clip for clip in simultaneous_clips() if clip.rh == 20}
+    ramps = {clip.name: (clip.reaction_start, clip.reaction_end)
+             for clip in simultaneous_clips() if clip.rh == 20}
+    # Full 80-degree run 2 has a user-verified timeline. Its RH20 reaction is
+    # optically H2-only enough to provide angle-robust weak supervision. RH30+
+    # remains simultaneous and is deliberately ignored for concentration.
+    ramps["1_80_2.MOV"] = (8.0, 138.0)
     for row in rows:
-        clip = clips.get(str(row["video"]))
-        if clip is None or clip.reaction_end is None:
+        ramp = ramps.get(str(row["video"]))
+        if ramp is None:
             continue
         time = float(row["time"])
-        if time < clip.reaction_start or time > clip.reaction_end:
+        reaction_start, reaction_end = ramp
+        if time < reaction_start or time > reaction_end:
             continue
         progress = np.clip(
-            (time - clip.reaction_start) / max(clip.reaction_end - clip.reaction_start, 1e-6), 0, 1)
+            (time - reaction_start) / max(reaction_end - reaction_start, 1e-6), 0, 1)
         continuous = float(4 * progress)
         row["h2_value"] = continuous
         row["continuous_target"] = continuous
         row["analysis_stage"] = float(np.clip(np.floor(continuous + .5), 0, 4))
         row["analysis_phase"] = "reaction"
         row["weak_supervision"] = True
-        endpoint_distance = min(time - clip.reaction_start, clip.reaction_end - time)
+        endpoint_distance = min(time - reaction_start, reaction_end - time)
         row["sample_weight_factor"] = 1.0 if endpoint_distance <= 1.0 else float(interior_weight)
 
 

@@ -77,6 +77,8 @@ Initial 대비 run-normalized 진행률 분석과 사용 데이터는 [`training
 
 중간 농도 endpoint를 독립 run별로 같은 방향·크기로 비교한 시트와 사용 데이터 흐름은 [`training/MIDDLE_ENDPOINT_REVIEW_GUIDE.md`](training/MIDDLE_ENDPOINT_REVIEW_GUIDE.md)에 정리했습니다. H2 2/3%와 RH 40/50/60/80%에서 원본 endpoint, 실제 형상 마스크, held-out 예측 및 경로 진행률을 함께 표시합니다. 이번 대상의 ROI는 도형을 제대로 덮고 있어, 남은 큰 오차는 주로 빠른 endpoint의 반응 지연과 run별 비직선 색 경로에서 발생합니다. 이 검토 결과로 타임라인을 자동 수정하지 않으며 사람 판정 뒤 exact/interval/제외 A/B를 수행합니다.
 
+80도 `1_80_2.MOV`의 RH20 Reaction을 H2 0→4% 보조 ramp로 추가한 결과는 [`training/ANGLE80_H2_AUGMENTATION.md`](training/ANGLE80_H2_AUGMENTATION.md)에 기록했습니다. 90도 H2-only 다섯 run held-out에서 4% recall만 증가하고 H2 1/2/3%, stage-balanced, ±1단계 및 MAE가 모두 악화되어 농도 모델에는 배포하지 않습니다. 이 run은 simultaneous 상태의 각도 강건성 자료로만 유지합니다.
+
 `training/inspect_reference_patches.py`는 회전 정규화 뒤 위-오른쪽과 아래-왼쪽의 흰색/회색 패치를 직접 검출해 시각 QA를 생성합니다. 이 패치는 학습 영상 촬영 안정화를 위한 것이며 실제 앱 촬영에는 없으므로 배포 입력이나 모델 특징으로 요구하지 않습니다. 패치 색을 고정 LAB 값으로 강제하는 보정은 전체 ramp 점수를 소폭 높였지만 4% endpoint를 크게 낮췄고, 패치 제거 또는 두 패치 중심 미세 정렬도 held-out 성능을 낮췄습니다. 따라서 관련 실험은 audit 코드로만 보존하며 배포 특징 추출기는 기존 중성 픽셀 보정과 원형 ROI/quarter-turn 정렬을 유지합니다.
 
 사용자가 정렬한 `_cropped` 영상은 원 타임라인을 유지한 별도 cache로 A/B 평가할 수 있습니다. 단순 원본 대체와 원본+crop 증강은 동일 run 블록 점수는 높였지만 독립 영상 held-out 점수를 낮춰 배포하지 않았습니다. 상세 수치와 원 검출 기하 문제는 [`training/CROPPED_VIDEO_AUDIT.md`](training/CROPPED_VIDEO_AUDIT.md)에 기록했습니다.
