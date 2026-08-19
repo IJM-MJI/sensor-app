@@ -32,7 +32,8 @@ TASKS = {
     "H2": {"kind": "h2_only", "label": "h2_value", "levels": [0, 1, 2, 3, 4],
            "display_levels": ["0", "1", "2", "3", "4"], "region": "flame"},
     "RH": {"kind": "rh_only", "label": "rh_value", "levels": [25, 40, 50, 60, 70, 80, 90],
-           "display_levels": ["20–30", "40", "50", "60", "70", "80", "90"], "region": "drop"},
+           "display_levels": ["20–30", "40", "50", "60", "70", "80", "90"],
+           "region": "drop_registered"},
 }
 MIN_STABLE_SECONDS = 1.0
 
@@ -47,9 +48,10 @@ FEATURE_NAMES = {
         "flame_chroma_p75", "flame_chroma_p90",
     ],
     "RH": [
-        "drop_L", "drop_a", "drop_b", "drop_chroma", "drop_sin_hue",
-        "drop_cos_hue", "drop_minus_flame_L", "drop_minus_flame_a",
-        "drop_minus_flame_b",
+        "drop_registered_L", "drop_registered_a", "drop_registered_b",
+        "drop_registered_chroma", "drop_registered_sin_hue",
+        "drop_registered_cos_hue", "drop_registered_minus_flame_L",
+        "drop_registered_minus_flame_a", "drop_registered_minus_flame_b",
     ],
 }
 
@@ -268,7 +270,9 @@ def add_stability(rows):
 
 
 def augment(row, region):
-    L, a, b = (float(row[f"{region}_{channel}"]) for channel in "Lab")
+    source_region = ("drop" if region == "drop_registered"
+                     and row.get("drop_registered_L") in (None, "") else region)
+    L, a, b = (float(row[f"{source_region}_{channel}"]) for channel in "Lab")
     reference = "drop" if region == "flame" else "flame"
     ref_L, ref_a, ref_b = (float(row[f"{reference}_{channel}"]) for channel in "Lab")
     chroma = float(np.hypot(a, b))
@@ -348,6 +352,9 @@ def export_regression_tree(tree):
 def predict_exported(model, x):
     if model["type"] == "linear_regression":
         return model["intercept"] + np.asarray(x) @ np.asarray(model["coefficients"])
+    if model["type"] == "multinomial_logistic":
+        scores = np.asarray(x) @ np.asarray(model["coefficients"]).T + np.asarray(model["intercepts"])
+        return np.asarray(model["classes"])[np.argmax(scores, axis=1)]
     output = np.zeros(len(x), dtype=float)
     for tree in model["trees"]:
         for row_index, values in enumerate(x):
@@ -381,12 +388,21 @@ def fit_and_export(rows, task, config, selected):
         "display_levels": config["display_levels"],
         "policy": "nearest stage; adjacent range near a stage boundary",
     }
-    if hasattr(estimator, "steps"):
+    if hasattr(estimator, "steps") and "ridge" in estimator.named_steps:
         scaler = estimator.named_steps["standardscaler"]
         ridge = estimator.named_steps["ridge"]
         coefficients = ridge.coef_ / scaler.scale_
         exported = {**common, "type": "linear_regression",
                     "intercept": float(ridge.intercept_ - np.dot(coefficients, scaler.mean_)),
+                    "coefficients": coefficients.tolist()}
+    elif hasattr(estimator, "steps") and "logisticregression" in estimator.named_steps:
+        scaler = estimator.named_steps["standardscaler"]
+        logistic = estimator.named_steps["logisticregression"]
+        coefficients = logistic.coef_ / scaler.scale_[None, :]
+        intercepts = logistic.intercept_ - coefficients @ scaler.mean_
+        exported = {**common, "type": "multinomial_logistic",
+                    "classes": logistic.classes_.tolist(),
+                    "intercepts": intercepts.tolist(),
                     "coefficients": coefficients.tolist()}
     elif isinstance(estimator, ExtraTreesRegressor):
         exported = {**common, "type": "extra_trees_regression",
@@ -646,7 +662,7 @@ def main():
     reports["H2"]["phase_analysis"] = phase_reports
     deployment = {
         "schema_version": 1,
-        "feature_extractor": "app-v7-neutral-balanced-shape-masks",
+        "feature_extractor": "app-v8-calibration-registered-drop-template",
         "h2_scope": "reaction_only",
         "rh_scope": "h2o_only_equivalent",
         "models": deployed_models,

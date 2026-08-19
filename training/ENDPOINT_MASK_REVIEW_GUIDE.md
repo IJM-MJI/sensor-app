@@ -95,3 +95,25 @@ estimate the sample/card translation and small rotation once from the calibratio
 photo, then apply the same transformed droplet template to the measurement photo.
 This should preserve the template's lower MAE without losing exact stage detail
 to position mismatch.
+
+## Calibration-registered droplet template
+
+The proposed rigid registration is now implemented without depending on the
+white/gray reference patches. A single RH20/H2 0% calibration photograph finds
+the weighted centres of the printed flame and main droplet, then stores the
+droplet translation and small rotation. Measurement photographs redetect the
+chamber but reuse that calibration-locked normalized template pose. The legacy
+rectangular droplet feature remains available to the state model; only the RH
+concentration model uses the registered two-droplet feature.
+
+On the same whole-video held-out protocol, the single-photo registration changes
+RH exact accuracy from 23.8% to 24.6%, stage-balanced accuracy from 23.1% to
+27.4%, within-one-stage accuracy from 37.3% to 44.7%, and MAE from 22.80 to
+16.29%p. All four adoption criteria improve, so this candidate replaces the RH
+browser concentration model. H2 remains unchanged at 44.5% exact, 48.5%
+stage-balanced, 96.2% within one stage, and 0.60%p MAE.
+
+The visual check is
+`training/output/registered_drop_v2_review/rh_endpoint_mask_review.jpg`.
+The cyan outline should follow the large and satellite droplets even when the
+card is slightly tilted; it is deliberately not a colour-threshold mask.

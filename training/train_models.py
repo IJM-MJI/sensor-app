@@ -38,6 +38,7 @@ from sklearn.preprocessing import StandardScaler
 FEATURE_NAMES = [
     "flame_L", "flame_a", "flame_b",
     "drop_L", "drop_a", "drop_b",
+    "drop_registered_L", "drop_registered_a", "drop_registered_b",
     "top_L", "top_a", "top_b",
 ]
 SHAPE_STAT_FEATURES = [
@@ -84,6 +85,7 @@ class Clip:
     orientation_quarters: int = 0
     fixed_circle: tuple[int, int, int] | None = None
     centered_crop: bool = False
+    registered_drop_template: bool = False
     minimum_sample_hz: float = 0.0
     cache_tag: str = ""
     analysis_end: float | None = None
@@ -666,6 +668,99 @@ def droplet_template_zone(
     return chamber_mask & (main | satellite)
 
 
+def registered_droplet_template_zone(
+    chamber_mask: np.ndarray,
+    nx: np.ndarray,
+    ny: np.ndarray,
+    registration: tuple[float, float, float],
+) -> np.ndarray:
+    """Place the two-droplet template at a calibration-locked pose."""
+    center_x, center_y, angle = registration
+    dx, dy = nx - center_x, ny - center_y
+    cosine, sine = np.cos(angle), np.sin(angle)
+    local_x = cosine * dx - sine * dy
+    local_y = sine * dx + cosine * dy
+    main = (local_x / .25) ** 2 + (local_y / .29) ** 2 <= 1.0
+    satellite = ((local_x - .30) / .14) ** 2 + ((local_y - .02) / .18) ** 2 <= 1.0
+    return chamber_mask & (main | satellite)
+
+
+def weighted_landmark_centroid(
+    lab: np.ndarray,
+    zone: np.ndarray,
+    background: np.ndarray,
+    nx: np.ndarray,
+    ny: np.ndarray,
+) -> tuple[float, float] | None:
+    ys, xs = np.where(zone)
+    if len(xs) < 30:
+        return None
+    pixels = lab[ys, xs].astype(float)
+    distance = np.sqrt(
+        (.35 * (pixels[:, 0] - background[0])) ** 2
+        + (pixels[:, 1] - background[1]) ** 2
+        + (pixels[:, 2] - background[2]) ** 2
+    )
+    cutoff = max(5.0, float(np.percentile(distance, 75)))
+    selected = distance >= cutoff
+    if selected.sum() < 12:
+        return None
+    weights = np.maximum(distance[selected] - cutoff, 1.0) ** 1.5
+    x_values = np.broadcast_to(nx, zone.shape)[ys[selected], xs[selected]]
+    y_values = np.broadcast_to(ny, zone.shape)[ys[selected], xs[selected]]
+    return float(np.average(x_values, weights=weights)), float(np.average(y_values, weights=weights))
+
+
+def landmark_registration(
+    frame: np.ndarray,
+    circle: tuple[int, int, int],
+    orientation_quarters: int,
+) -> tuple[float, float, float] | None:
+    """Estimate a patch-free rigid pose from printed flame/drop landmarks."""
+    frame = resize_for_app(frame)
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    x, y, radius = circle
+    yy, xx = np.ogrid[:lab.shape[0], :lab.shape[1]]
+    chamber = (xx - x) ** 2 + (yy - y) ** 2 <= (radius * .90) ** 2
+    nx, ny = normalized_coordinates(lab.shape, circle, orientation_quarters)
+    balanced = patch_balance_lab(lab, chamber)
+    chamber_pixels = balanced[chamber].astype(float)
+    if len(chamber_pixels) < 100:
+        return None
+    chroma = np.hypot(chamber_pixels[:, 1] - 128, chamber_pixels[:, 2] - 128)
+    background = chamber_pixels[np.argsort(chroma)[:max(1, len(chroma) // 2)]].mean(axis=0)
+    # Tight cores exclude the lower-left calibration square and the satellite
+    # droplet, both of which otherwise pull the main-droplet landmark sideways.
+    flame_zone = chamber & (nx >= -.35) & (nx <= .25) & (ny >= -.60) & (ny <= .10)
+    main_drop_zone = chamber & (nx >= -.22) & (nx <= .14) & (ny >= .20) & (ny <= .68)
+    flame = weighted_landmark_centroid(balanced, flame_zone, background, nx, ny)
+    drop = weighted_landmark_centroid(balanced, main_drop_zone, background, nx, ny)
+    if flame is None or drop is None:
+        return None
+    vector_x, vector_y = drop[0] - flame[0], drop[1] - flame[1]
+    distance = math.hypot(vector_x, vector_y)
+    angle = math.atan2(vector_x, vector_y)
+    if not (.35 <= distance <= 1.15 and abs(angle) <= math.radians(25)
+            and -.40 <= drop[0] <= .22 and .18 <= drop[1] <= .70):
+        return None
+    return drop[0], drop[1], angle
+
+
+def calibration_registration(
+    cap: cv2.VideoCapture,
+    track: list[tuple[float, tuple[int, int, int]]],
+    orientation_quarters: int,
+) -> tuple[float, float, float] | None:
+    # Match the browser workflow: calibration is one immediate photograph, not
+    # a temporal average. Videos use a settled early frame as that photograph.
+    seconds = 4.5
+    frame = frame_at(cap, seconds)
+    if frame is None:
+        return None
+    circle = min(track, key=lambda item: abs(item[0] - seconds))[1]
+    return landmark_registration(frame, circle, orientation_quarters)
+
+
 def shape_summary(shape: np.ndarray, prefix: str) -> tuple[np.ndarray, dict[str, float]]:
     """Return the legacy mean plus distribution features from one shape mask."""
     mean = np.mean(shape, axis=0)
@@ -686,6 +781,7 @@ def extract_features(
     frame: np.ndarray,
     circle: tuple[int, int, int],
     orientation_quarters: int = 0,
+    drop_registration: tuple[float, float, float] | None = None,
 ) -> dict[str, float]:
     frame = resize_for_app(frame)
     raw_lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
@@ -716,11 +812,18 @@ def extract_features(
     # (notably RH response runs) and incorrectly fed it to the droplet region.
     flame_zone = mask & central_x & (ny >= -.62) & (ny <= .14)
     drop_zone = mask & central_x & (ny >= .18) & (ny <= .68)
+    registered_zone = (registered_droplet_template_zone(mask, nx, ny, drop_registration)
+                       if drop_registration is not None else drop_zone)
     flame, flame_stats = shape_summary(masked_shape_pixels(lab, flame_zone, bg), "flame")
     drop, drop_stats = shape_summary(masked_shape_pixels(lab, drop_zone, bg), "drop")
+    drop_registered, _ = shape_summary(
+        masked_shape_pixels(lab, registered_zone, bg), "drop_registered")
     return {
         "flame_L": flame[0], "flame_a": flame[1], "flame_b": flame[2],
         "drop_L": drop[0], "drop_a": drop[1], "drop_b": drop[2],
+        "drop_registered_L": drop_registered[0],
+        "drop_registered_a": drop_registered[1],
+        "drop_registered_b": drop_registered[2],
         "bg_L": bg[0], "bg_a": bg[1], "bg_b": bg[2],
         "top_L": top[0], "top_a": top[1], "top_b": top[2],
         **flame_stats, **drop_stats,
@@ -729,7 +832,7 @@ def extract_features(
 
 def corrected(feat: dict[str, float]) -> dict[str, float]:
     out: dict[str, float] = {}
-    for region in ("flame", "drop", "top"):
+    for region in ("flame", "drop", "drop_registered", "top"):
         for channel in ("L", "a", "b"):
             out[f"{region}_{channel}"] = feat[f"{region}_{channel}"] - feat[f"bg_{channel}"]
     return out
@@ -834,6 +937,13 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
     # above the droplet. Semantic orientation must never be inferred from color
     # area because a reacted droplet can be larger/more chromatic than the flame.
     orientation_lock, orientation_lock_confidence = clip.orientation_quarters, 1.0
+    drop_registration = (calibration_registration(cap, track, orientation_lock)
+                         if clip.registered_drop_template else None)
+    if clip.registered_drop_template:
+        status = ("fallback" if drop_registration is None else
+                  f"x={drop_registration[0]:.3f}, y={drop_registration[1]:.3f}, "
+                  f"angle={math.degrees(drop_registration[2]):.1f}deg")
+        print(f"{clip.name}: calibration registration {status}")
     raw: list[tuple[float, dict[str, float], int, float, tuple[int, int, int]]] = []
     detected_circles: list[tuple[int, int, int]] = []
     # Seeking repeatedly in phone MP4s can decode from the previous keyframe (or
@@ -857,7 +967,9 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
                 break
             try:
                 circle = min(track, key=lambda item: abs(item[0] - t))[1]
-                raw.append((float(t), extract_features(frame, circle, orientation_lock), orientation_lock, 1.0, circle))
+                raw.append((float(t), extract_features(
+                    frame, circle, orientation_lock, drop_registration),
+                    orientation_lock, 1.0, circle))
                 detected_circles.append(circle)
             except RuntimeError:
                 pass
@@ -877,6 +989,9 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
             "circle_x": circle[0], "circle_y": circle[1], "circle_r": circle[2],
             "orientation_quarters": orientation,
             "orientation_confidence": orientation_confidence,
+            "drop_registration_x": None if drop_registration is None else drop_registration[0],
+            "drop_registration_y": None if drop_registration is None else drop_registration[1],
+            "drop_registration_angle": None if drop_registration is None else drop_registration[2],
         }
         for name in FEATURE_NAMES:
             row[name] = corr[name]
@@ -1179,6 +1294,10 @@ def main() -> None:
         "--features-only", action="store_true",
         help="refresh the calibrated feature cache without replacing deployed models",
     )
+    parser.add_argument(
+        "--registered-drop-template", action="store_true",
+        help="lock a two-droplet template to patch-free calibration landmarks",
+    )
     nominal_legacy = Path(f"training/cache/{CACHE_VERSION}/legacy_continuous.csv")
     lag_corrected_legacy = Path(f"training/cache/{CACHE_VERSION}/legacy_continuous_lag_corrected.csv")
     parser.add_argument(
@@ -1196,6 +1315,8 @@ def main() -> None:
         rows = []
         clip_cache = args.cache.parent / "clips"
         for clip in clips:
+            if args.registered_drop_template:
+                clip = replace(clip, registered_drop_template=True)
             source_clip = clip
             source_name = clip.name
             cropped_name = Path(clip.name).stem + "_cropped.mp4"
@@ -1208,12 +1329,26 @@ def main() -> None:
                                       centered_crop=True)
             source_tag = ".cropped-v4-centered-smooth.fixed-boundary-v2" \
                 if source_name == cropped_name else ".fixed-boundary-v2"
+            if args.registered_drop_template:
+                source_tag += ".rd-v2"
             cache_identity = source_name + source_tag + (f".{clip.cache_tag}" if clip.cache_tag else "")
             safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", cache_identity) + ".csv"
             cached = clip_cache / safe_name
             if cached.exists():
-                clip_rows = relabel_rows(read_csv(cached), clip)
-                print(f"{clip.name}: loaded {len(clip_rows)} cached frames")
+                cached_rows = read_csv(cached)
+                # FEATURE_NAMES is part of the cache schema.  Re-extract older
+                # per-clip caches instead of failing later (or silently mixing
+                # rows) when a new measurement channel is introduced.
+                cache_complete = (not cached_rows or
+                                  all(name in cached_rows[0] for name in FEATURE_NAMES))
+                if cache_complete:
+                    clip_rows = relabel_rows(cached_rows, clip)
+                    print(f"{clip.name}: loaded {len(clip_rows)} cached frames")
+                else:
+                    print(f"{clip.name}: refreshing stale feature cache")
+                    clip_rows = relabel_rows(
+                        sample_clip(args.video_root, source_clip, args.sample_hz), clip)
+                    write_csv(cached, clip_rows)
             else:
                 clip_rows = relabel_rows(sample_clip(args.video_root, source_clip, args.sample_hz), clip)
                 write_csv(cached, clip_rows)

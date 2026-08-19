@@ -205,26 +205,31 @@ body{
 </div>
 
 <script src="sensor-model.js?v=20260813-3"></script>
-<script src="sensor-concentration-model.js?v=20260813-1"></script>
+<script src="sensor-concentration-model.js?v=20260819-1"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.13-concentration-stages-v2';
+var APP_VERSION='2026.08.19-registered-drop-v1';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
   flame_L:129.8,flame_a:119.1,flame_b:159.3,
   drop_L:132.8,drop_a:123.1,drop_b:145.6,
+  drop_registered_L:132.8,drop_registered_a:123.1,drop_registered_b:145.6,
   bg_L:126.9,bg_a:127.4,bg_b:133.5,
   top_L:129.0,top_a:118.1,top_b:163.0
 };
 var BL=JSON.parse(JSON.stringify(BL_DEFAULT));
 var calibrated=false;
 var calMode=false;
+var dropRegistration=null;
 
 function loadCal(){}
 
 function saveCal(feat){
   for(var k in feat) if(typeof feat[k]==='number'&&isFinite(feat[k])) BL[k]=feat[k];
+  dropRegistration=feat._dropRegistration?{
+    x:feat._dropRegistration.x,y:feat._dropRegistration.y,angle:feat._dropRegistration.angle
+  }:null;
   calibrated=true;
   updateCalUI();
 }
@@ -232,6 +237,7 @@ function saveCal(feat){
 function clearCal(){
   BL=JSON.parse(JSON.stringify(BL_DEFAULT));
   calibrated=false;
+  dropRegistration=null;
   manualROI=null;
   updateCalUI();
 
@@ -375,7 +381,7 @@ var SM={no_sensor:['Sensor not found','#999'],
 // ===== DUAL-STATE MODEL (generated from the 2026-08 recordings) =====
 function stateDelta(f,name){
   // Match training: per-chip baseline delta for each shape measurement.
-  var match=/^(flame|drop|top)_([Lab])$/.exec(name);
+  var match=/^(flame|drop|drop_registered|top)_([Lab])$/.exec(name);
   if(match){
     var bg='bg_'+match[2];
     return (f[name]-f[bg])-(BL[name]-BL[bg]);
@@ -424,7 +430,7 @@ function ridgeEstimate(model,f){
 }
 function concentrationVector(model,f){
   var d={};
-  ['flame','drop'].forEach(function(region){
+  ['flame','drop','drop_registered'].forEach(function(region){
     ['L','a','b'].forEach(function(ch){d[region+'_'+ch]=stateDelta(f,region+'_'+ch);});
     var a=d[region+'_a'],b=d[region+'_b'],c=Math.sqrt(a*a+b*b),h=Math.atan2(b,a);
     d[region+'_chroma']=c;d[region+'_sin_hue']=Math.sin(h);d[region+'_cos_hue']=Math.cos(h);
@@ -432,6 +438,7 @@ function concentrationVector(model,f){
   ['L','a','b'].forEach(function(ch){
     d['flame_minus_drop_'+ch]=d['flame_'+ch]-d['drop_'+ch];
     d['drop_minus_flame_'+ch]=d['drop_'+ch]-d['flame_'+ch];
+    d['drop_registered_minus_flame_'+ch]=d['drop_registered_'+ch]-d['flame_'+ch];
     d['baseline_flame_'+ch]=(BL['flame_'+ch]-BL['bg_'+ch]);
     d['baseline_flame_minus_drop_'+ch]=(BL['flame_'+ch]-BL['bg_'+ch])-(BL['drop_'+ch]-BL['bg_'+ch]);
   });
@@ -444,6 +451,15 @@ function concentrationRaw(model,f){
   var v=concentrationVector(model,f);
   if(model.type==='linear_regression'){
     var out=model.intercept;for(var i=0;i<v.length;i++)out+=model.coefficients[i]*v[i];return out;
+  }
+  if(model.type==='multinomial_logistic'){
+    var best=0,bestScore=-Infinity;
+    for(var c=0;c<model.classes.length;c++){
+      var score=model.intercepts[c];
+      for(var j=0;j<v.length;j++)score+=model.coefficients[c][j]*v[j];
+      if(score>bestScore){bestScore=score;best=c;}
+    }
+    return model.classes[best];
   }
   var sum=0;
   for(var i=0;i<model.trees.length;i++){
@@ -983,16 +999,60 @@ function detectAndClassify(src){
     for(var i=0;i<out.length;i++)if(out[i].cat!=='top')out[i].cat=name;
     return out;
   }
-  var flamePx=shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=-.62&&p.ny<=-.02;},'flame');
-  var dropPx=shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=.02&&p.ny<=.68;},'drop');
+  function weightedLandmark(zone){
+    var scored=[];
+    for(var i=0;i<allPx.length;i++){
+      var p=allPx[i];if(!zone(p))continue;
+      var dL=.35*(p.L-bgL),da=p.a-bgA,db=p.b-bgB;
+      scored.push({p:p,d:Math.sqrt(dL*dL+da*da+db*db)});
+    }
+    if(scored.length<30)return null;
+    scored.sort(function(a,b){return a.d-b.d;});
+    var cutoff=Math.max(5,scored[Math.floor((scored.length-1)*.75)].d);
+    var sx=0,sy=0,sw=0,count=0;
+    for(var i=0;i<scored.length;i++)if(scored[i].d>=cutoff){
+      var weight=Math.pow(Math.max(scored[i].d-cutoff,1),1.5);
+      sx+=scored[i].p.nx*weight;sy+=scored[i].p.ny*weight;sw+=weight;count++;
+    }
+    return count>=12&&sw>0?{x:sx/sw,y:sy/sw}:null;
+  }
+  function estimateDropRegistration(){
+    var flame=weightedLandmark(function(p){
+      return p.nx>=-.35&&p.nx<=.25&&p.ny>=-.60&&p.ny<=.10;
+    });
+    var drop=weightedLandmark(function(p){
+      return p.nx>=-.22&&p.nx<=.14&&p.ny>=.20&&p.ny<=.68;
+    });
+    if(!flame||!drop)return null;
+    var vx=drop.x-flame.x,vy=drop.y-flame.y;
+    var distance=Math.sqrt(vx*vx+vy*vy),angle=Math.atan2(vx,vy);
+    if(distance<.35||distance>1.15||Math.abs(angle)>25*Math.PI/180||
+       drop.x<-.40||drop.x>.22||drop.y<.18||drop.y>.70)return null;
+    return{x:drop.x,y:drop.y,angle:angle};
+  }
+  var activeRegistration=calibrated?dropRegistration:estimateDropRegistration();
+  var flamePx=shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=-.62&&p.ny<=.14;},'flame');
+  var dropPx=shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=.18&&p.ny<=.68;},'drop');
+  var dropRegisteredPx=shapePixels(function(p){
+    if(!activeRegistration)return p.nx>=-.55&&p.nx<=.35&&p.ny>=.18&&p.ny<=.68;
+    var dx=p.nx-activeRegistration.x,dy=p.ny-activeRegistration.y;
+    var cosine=Math.cos(activeRegistration.angle),sine=Math.sin(activeRegistration.angle);
+    var localX=cosine*dx-sine*dy,localY=sine*dx+cosine*dy;
+    var main=(localX/.25)*(localX/.25)+(localY/.29)*(localY/.29)<=1;
+    var satellite=((localX-.30)/.14)*((localX-.30)/.14)+
+                  ((localY-.02)/.18)*((localY-.02)/.18)<=1;
+    return main||satellite;
+  },'drop_registered');
   function meanLab(px,fallback){
     if(!px.length)return fallback;var L=0,a=0,b=0;
     for(var i=0;i<px.length;i++){L+=px[i].L;a+=px[i].a;b+=px[i].b;}
     return[L/px.length,a/px.length,b/px.length];
   }
   var fm=meanLab(flamePx,[topL,topA,topB]),dm=meanLab(dropPx,[topL,topA,topB]);
+  var drm=meanLab(dropRegisteredPx,dm);
   var flameL=fm[0],flameA=fm[1],flameB=fm[2];
   var dropL=dm[0],dropA=dm[1],dropB=dm[2];
+  var dropRegisteredL=drm[0],dropRegisteredA=drm[1],dropRegisteredB=drm[2];
   var flameChroma=flamePx.map(function(p){return p.c;}).sort(function(a,b){return a-b;});
   function percentile(sorted,p){
     if(!sorted.length)return 0;
@@ -1004,13 +1064,17 @@ function detectAndClassify(src){
   var feat={
     flame_L:flameL,flame_a:flameA,flame_b:flameB,
     drop_L:dropL,drop_a:dropA,drop_b:dropB,
+    drop_registered_L:dropRegisteredL,
+    drop_registered_a:dropRegisteredA,
+    drop_registered_b:dropRegisteredB,
     bg_L:bgL,bg_a:bgA,bg_b:bgB,
     top_L:topL,top_a:topA,top_b:topB,
     flame_chroma_p10:percentile(flameChroma,10),
     flame_chroma_p25:percentile(flameChroma,25),
     flame_chroma_p50:percentile(flameChroma,50),
     flame_chroma_p75:percentile(flameChroma,75),
-    flame_chroma_p90:percentile(flameChroma,90)
+    flame_chroma_p90:percentile(flameChroma,90),
+    _dropRegistration:activeRegistration
   };
 
   var clf=doClassify(feat);
@@ -1019,13 +1083,16 @@ function detectAndClassify(src){
     ') dr=('+dropA.toFixed(1)+','+dropB.toFixed(0)+
     ') fl=('+flameA.toFixed(1)+','+flameB.toFixed(0)+
     ') bg=('+bgA.toFixed(1)+','+bgB.toFixed(0)+
+    ') reg='+(activeRegistration?(activeRegistration.x.toFixed(2)+','+
+      activeRegistration.y.toFixed(2)+','+(activeRegistration.angle*180/Math.PI).toFixed(1)+'deg'):'fallback')+
     ') pH2='+(clf.h2p==null?'-':Number(clf.h2p).toFixed(3))+
     ' pRH='+(clf.rhp==null?'-':Number(clf.rhp).toFixed(3))+
     (calibrated?' [CAL]':' [DEF]')+' ['+roiSource+'] '+APP_VERSION;
   clf._dbgGeo={cx:bCx,cy:bCy,r:bR,innerR:innerR,w:w,h:h,
     totalCircles:nCircles,brightness:Math.round(bBr),roiSource:roiSource,
     chromaScore:bScore<0?null:Math.round(bScore*100),
-    nPx:n,nTop:topPx.length,nBg:bgPx.length,nHiC:flamePx.length+dropPx.length,
+    nPx:n,nTop:topPx.length,nBg:bgPx.length,
+    nHiC:flamePx.length+dropPx.length,nDropRegistered:dropRegisteredPx.length,
     pixels:allPx};
   return clf;
 }

@@ -12,7 +12,7 @@ import numpy as np
 
 from train_models import (
     CACHE_VERSION, droplet_template_zone, normalized_coordinates, patch_balance_lab,
-    read_csv, resize_for_app, shape_pixel_mask,
+    read_csv, registered_droplet_template_zone, resize_for_app, shape_pixel_mask,
 )
 
 
@@ -34,6 +34,7 @@ def masks_for(
     row: dict[str, object],
     drop_percentile: float,
     drop_template: bool,
+    registered_drop_template: bool,
 ):
     x, y, radius = (int(float(row[name])) for name in ("circle_x", "circle_y", "circle_r"))
     orientation = int(float(row["orientation_quarters"]))
@@ -47,8 +48,15 @@ def masks_for(
     background = chamber_pixels[np.argsort(chroma)[:max(1, len(chroma) // 2)]].mean(axis=0)
     central = (nx >= -.55) & (nx <= .35)
     flame_zone = chamber & central & (ny >= -.62) & (ny <= .14)
-    drop_zone = (droplet_template_zone(chamber, nx, ny) if drop_template
-                 else chamber & central & (ny >= .18) & (ny <= .68))
+    registration_values = [row.get(f"drop_registration_{name}")
+                           for name in ("x", "y", "angle")]
+    if registered_drop_template and all(value not in (None, "") for value in registration_values):
+        registration = tuple(float(value) for value in registration_values)
+        drop_zone = registered_droplet_template_zone(chamber, nx, ny, registration)
+    elif drop_template:
+        drop_zone = droplet_template_zone(chamber, nx, ny)
+    else:
+        drop_zone = chamber & central & (ny >= .18) & (ny <= .68)
     return flame_zone, drop_zone, shape_pixel_mask(balanced, flame_zone, background), \
         shape_pixel_mask(balanced, drop_zone, background, drop_percentile), (x, y, radius)
 
@@ -64,9 +72,10 @@ def render_tile(
     audit_row: dict[str, str],
     drop_percentile: float,
     drop_template: bool,
+    registered_drop_template: bool,
 ) -> np.ndarray:
     flame_zone, drop_zone, flame, drop, circle = masks_for(
-        frame, cache_row, drop_percentile, drop_template)
+        frame, cache_row, drop_percentile, drop_template, registered_drop_template)
     overlay = frame.copy()
     colour = np.zeros_like(frame)
     colour[flame] = (0, 40, 255)       # red/orange: actual H2 pixels
@@ -106,6 +115,7 @@ def main():
     parser.add_argument("--per-task", type=int, default=12)
     parser.add_argument("--drop-percentile", type=float, default=65.0)
     parser.add_argument("--drop-template", action="store_true")
+    parser.add_argument("--registered-drop-template", action="store_true")
     args = parser.parse_args(); args.output.mkdir(parents=True, exist_ok=True)
 
     cache = read_csv(args.cache)
@@ -126,7 +136,8 @@ def main():
             cache_row = min(by_video[video], key=lambda row: abs(float(row["time"]) - seconds))
             frame = frame_at(source_path(args.video_root, video), seconds)
             tiles.append(render_tile(frame, cache_row, audit_row,
-                                     args.drop_percentile, args.drop_template))
+                                     args.drop_percentile, args.drop_template,
+                                     args.registered_drop_template))
         if not tiles:
             continue
         columns = 2
