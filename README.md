@@ -71,7 +71,9 @@ H2의 긴 4% hold가 전체 점수를 부풀리는지 확인하기 위해 Reacti
 
 `training/h2_endpoint_range_analysis.py`는 구간 마지막 1초를 정확한 endpoint, 구간 내부를 농도 범위로 취급하고 4% hold와 baseline의 총 가중치를 제한합니다. 동일한 96개 endpoint 프레임에서 현재 Reaction 모델은 정확도 63.5%, stage-balanced 61.2%, ±1% 이내 94.8%, MAE 0.42%p였습니다. 범위 가중치와 규제를 outer test 영상 밖에서만 선택한 nested 범위 모델은 정확도 53.1%, MAE 0.54%p로 더 낮아 최종 모델로 채택하지 않습니다. Endpoint 평가는 별도의 엄격한 audit로 유지하고, recovery는 두 방식 모두 정량 학습에서 제외합니다.
 
-H2와 RH를 동일한 규칙으로 다시 구성한 최신 분석은 [`training/ENDPOINT_INTERVAL_GUIDE.md`](training/ENDPOINT_INTERVAL_GUIDE.md)에 기록했습니다. 각 타임라인 끝의 0.55초와 실제 hold만 정확 라벨로 사용하고 ramp 내부는 lower/upper interval로만 저장합니다. 동일 endpoint 평가셋에서 RH exact는 기존 선형 ramp 라벨 모델 30.2%에서 56.9%, stage-balanced는 25.8%에서 40.2%, MAE는 12.63에서 8.53%p로 개선됐습니다. H2 exact는 55.8%에서 58.9%로 소폭 개선됐지만 중간 단계의 run 간 색 겹침은 남아 있습니다. 이 후보는 아직 앱에 배포하지 않았으며 다음 단계는 run 내부 반응 진행률 정규화입니다.
+H2와 RH를 동일한 규칙으로 다시 구성한 최신 분석은 [`training/ENDPOINT_INTERVAL_GUIDE.md`](training/ENDPOINT_INTERVAL_GUIDE.md)에 기록했습니다. 각 타임라인 endpoint에 가장 가까운 단 한 프레임과 실제 hold만 정확 라벨로 사용하고 ramp 내부는 lower/upper interval로만 저장합니다. 끝 직전 여러 프레임을 exact로 중복 계산하지 않으며 H2 recovery는 제외합니다. 엄격한 endpoint 평가는 H2 77프레임, RH 84프레임이고 중간 단계는 대부분 run당 한 프레임뿐이므로 exact accuracy와 stage-balanced accuracy를 함께 해석합니다.
+
+Initial 대비 run-normalized 진행률 분석과 사용 데이터는 [`training/RUN_PROGRESS_GUIDE.md`](training/RUN_PROGRESS_GUIDE.md)에 정리했습니다. 현재 앱과 호환되는 Initial 한 점 정규화는 H2 exact 71.4%/stage-balanced 50.4%, RH exact 67.9%/stage-balanced 46.6%였습니다. 알려진 고농도 기준을 추가한 직선형 two-anchor 정규화는 두 축 모두 악화되어, 중간 색 궤적이 단순한 저농도-고농도 직선이 아님을 확인했습니다. 이 후보들은 아직 앱에 배포하지 않았습니다.
 
 `training/inspect_reference_patches.py`는 회전 정규화 뒤 위-오른쪽과 아래-왼쪽의 흰색/회색 패치를 직접 검출해 시각 QA를 생성합니다. 이 패치는 학습 영상 촬영 안정화를 위한 것이며 실제 앱 촬영에는 없으므로 배포 입력이나 모델 특징으로 요구하지 않습니다. 패치 색을 고정 LAB 값으로 강제하는 보정은 전체 ramp 점수를 소폭 높였지만 4% endpoint를 크게 낮췄고, 패치 제거 또는 두 패치 중심 미세 정렬도 held-out 성능을 낮췄습니다. 따라서 관련 실험은 audit 코드로만 보존하며 배포 특징 추출기는 기존 중성 픽셀 보정과 원형 ROI/quarter-turn 정렬을 유지합니다.
 

@@ -36,6 +36,17 @@ MAX_HOLD_EVAL_PER_VIDEO_STAGE = 8
 MAX_BASELINE_EVAL_PER_VIDEO = 4
 
 
+class ConstantBinary:
+    """Fold-safe binary probability when a sparse threshold has one class."""
+
+    def __init__(self, positive: bool):
+        self.positive = float(positive)
+
+    def predict_proba(self, x):
+        positive = np.full(len(x), self.positive)
+        return np.column_stack([1 - positive, positive])
+
+
 def stage_value(task: str, value: float) -> float:
     levels = np.asarray(TASKS[task]["levels"], dtype=float)
     return float(levels[np.argmin(np.abs(levels - float(value)))])
@@ -43,8 +54,8 @@ def stage_value(task: str, value: float) -> float:
 
 def supervision_for(
     task: str, video: str, time: float, duration: float,
-) -> tuple[float, float, float | None, str] | None:
-    """Return lower stage, upper stage, optional exact stage, and source."""
+) -> tuple[float, float, float | None, str, float | None] | None:
+    """Return bounds, optional exact stage/source, and endpoint timestamp."""
     points = H2_RAMP_ENDPOINTS.get(video) if task == "H2" else RH_RAMP_ENDPOINTS.get(video)
     if not points:
         return None
@@ -55,7 +66,7 @@ def supervision_for(
         # Every H2 run starts at a known 0% calibration condition.  This is a
         # real baseline anchor even when the first ramp starts immediately.
         if time <= min(1.0, points[1][0] if len(points) > 1 else 1.0):
-            return 0.0, 0.0, 0.0, "baseline"
+            return 0.0, 0.0, 0.0, "baseline", None
 
     first_time, first_value = points[0]
     if time < first_time:
@@ -66,16 +77,16 @@ def supervision_for(
             previous_stage = stage_value(task, previous_value)
             target_stage = stage_value(task, target)
             if previous_stage == target_stage:
-                return target_stage, target_stage, target_stage, "hold"
+                return target_stage, target_stage, target_stage, "hold", None
             lower, upper = sorted((previous_stage, target_stage))
-            if end - ENDPOINT_WINDOW_SECONDS <= time <= end:
-                return target_stage, target_stage, target_stage, "endpoint"
-            return lower, upper, None, "interval"
+            if abs(time - end) <= ENDPOINT_WINDOW_SECONDS:
+                return lower, upper, target_stage, "endpoint", float(end)
+            return lower, upper, None, "interval", None
         previous_time, previous_value = end, target
 
     if task == "H2" and video not in H2_RECOVERY_START and time >= points[-1][0]:
         target = stage_value(task, points[-1][1])
-        return target, target, target, "hold"
+        return target, target, target, "hold", None
     return None
 
 
@@ -89,12 +100,28 @@ def prepare(rows: list[dict[str, object]]) -> list[dict[str, object]]:
             task, str(row["video"]), float(row["time"]), float(row["duration"]))
         if label is None:
             continue
-        lower, upper, exact, source = label
+        lower, upper, exact, source, endpoint_time = label
         prepared.append({
             "task": task, "row": row, "lower": lower, "upper": upper,
             "exact": exact, "source": source, "group": str(row["group"]),
             "video": str(row["video"]), "time": float(row["time"]),
+            "endpoint_time": endpoint_time,
         })
+
+    # A timeline endpoint is an instant, not a plateau. Of the sampled frames
+    # within the decoding tolerance, keep only the single nearest frame exact;
+    # return the others to their original interval-censored supervision.
+    endpoint_candidates = defaultdict(list)
+    for item in prepared:
+        if item["source"] == "endpoint":
+            endpoint_candidates[(item["task"], item["video"], item["endpoint_time"])].append(item)
+    for (_, _, endpoint_time), candidates in endpoint_candidates.items():
+        nearest = min(candidates, key=lambda item: abs(item["time"] - endpoint_time))
+        for item in candidates:
+            if item is not nearest:
+                item["exact"] = None
+                item["source"] = "interval"
+                item["endpoint_time"] = None
 
     # Score every short endpoint window.  Long baseline/hold sequences are
     # deterministically thinned so duration cannot inflate a stage's score.
@@ -154,9 +181,15 @@ def fit_censored(items, task, train, C, interval_weight):
         known = train & ((upper <= threshold) | (lower > threshold))
         y = lower[known] > threshold
         weights = base_weights[known] * np.where(exact[known], 1.0, interval_weight)
-        model = make_pipeline(StandardScaler(), LogisticRegression(
-            C=C, max_iter=3000, class_weight="balanced", random_state=42))
-        model.fit(x[known], y, logisticregression__sample_weight=weights)
+        active = weights > 0
+        if not np.any(active):
+            model = ConstantBinary(False)
+        elif len(set(y[active])) < 2:
+            model = ConstantBinary(bool(y[active][0]))
+        else:
+            model = make_pipeline(StandardScaler(), LogisticRegression(
+                C=C, max_iter=3000, class_weight="balanced", random_state=42))
+            model.fit(x[known], y, logisticregression__sample_weight=weights)
         models.append(model)
     return models, x
 
@@ -318,7 +351,8 @@ def metric_report(items, task, truth, prediction, confidence, chosen, policy):
 
 def write_dataset(path, items):
     rows = [{key: item[key] for key in (
-        "task", "video", "group", "time", "source", "lower", "upper", "exact", "evaluate")}
+        "task", "video", "group", "time", "source", "lower", "upper", "exact",
+        "endpoint_time", "evaluate")}
             for item in items]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))

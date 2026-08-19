@@ -6,7 +6,8 @@ The supplied H2 and RH timelines specify the concentration reached at each
 interval end. `training/endpoint_interval_analysis.py` therefore rebuilds the
 quantitative dataset as follows:
 
-- the final 0.55 s before each stated endpoint is an exact concentration;
+- the single sampled frame nearest each stated endpoint is an exact concentration
+  (0.55 s is only the decoding/search tolerance, not an exact-label window);
 - a repeated-value segment is an exact hold;
 - a ramp interior stores only its lower and upper possible stage;
 - H2 recovery is excluded rather than being relabelled as immediate 0%;
@@ -27,32 +28,32 @@ same endpoint frames.
 
 | Task/model | Exact | Stage-balanced | Within one stage | MAE |
 |---|---:|---:|---:|---:|
-| H2 old linear-ramp labels | 55.8% | 47.2% | 92.6% | 0.52%p |
-| H2 endpoint exact multinomial | 58.9% | 47.8% | 88.4% | 0.58%p |
-| H2 interval-censored ordinal | 66.3% | 46.8% | 86.3% | 0.51%p |
-| RH old linear-ramp labels | 30.2% | 25.8% | 68.1% | 12.63%p |
-| RH endpoint exact multinomial | 56.9% | 40.2% | 75.9% | 8.53%p |
-| RH interval-censored ordinal | 50.9% | 32.1% | 65.5% | 12.28%p |
+| H2 old linear-ramp labels | 62.3% | 52.4% | 93.5% | 0.44%p |
+| H2 endpoint exact multinomial | 64.9% | 46.6% | 92.2% | 0.47%p |
+| H2 interval-censored ordinal | 77.9% | 50.3% | 94.8% | 0.29%p |
+| RH old linear-ramp labels | 33.3% | 26.2% | 70.2% | 12.38%p |
+| RH endpoint exact multinomial | 69.0% | 41.4% | 81.0% | 6.55%p |
+| RH interval-censored ordinal | 57.1% | 27.8% | 79.8% | 9.58%p |
 
-The H2 endpoint policy improves exact accuracy only slightly when sparse stages
-are weighted equally. RH improves substantially, confirming that treating ramp
-interiors as exact linear concentrations was a major RH label error. However,
-the middle-stage recalls remain low: H2 2/3% are 20/30%, and RH 50/60% are 0%
-on unseen runs. The endpoint relabelling is correct, but run-to-run colour-path
-normalization is still required before replacing the browser model.
+The strict endpoint protocol contains 77 H2 and 84 RH evaluation frames. Only
+one frame per run is available for most middle-stage endpoints, so each of those
+recalls is based on roughly five independent examples. RH improves substantially,
+confirming that treating ramp interiors as exact linear concentrations was a
+major label error. Exact accuracy alone is inflated by the genuine low/high
+holds; stage-balanced accuracy remains the model-selection criterion.
 
 Generated local artifacts:
 
-- `training/output/endpoint_interval_registered_v2/endpoint_interval_dataset.csv`
-- `training/output/endpoint_interval_registered_v2/metrics.json`
-- `training/output/endpoint_interval_registered_v2/predictions.csv`
-- `training/output/endpoint_interval_registered_v2/endpoint_interval_validation.png/.pdf/.svg`
+- `training/output/endpoint_interval_registered_v3/endpoint_interval_dataset.csv`
+- `training/output/endpoint_interval_registered_v3/metrics.json`
+- `training/output/endpoint_interval_registered_v3/predictions.csv`
+- `training/output/endpoint_interval_registered_v3/endpoint_interval_validation.png/.pdf/.svg`
 
 ## Reproduce
 
 ```powershell
 .venv\Scripts\python training\endpoint_interval_analysis.py `
   --cache training\cache\v7-verified-orientation-recovery-tail\features_registered_drop_v2.csv `
-  --output training\output\endpoint_interval_registered_v2
+  --output training\output\endpoint_interval_registered_v3
 ```
 
