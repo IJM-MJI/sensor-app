@@ -75,6 +75,8 @@ H2와 RH를 동일한 규칙으로 다시 구성한 최신 분석은 [`training/
 
 Initial 대비 run-normalized 진행률 분석과 사용 데이터는 [`training/RUN_PROGRESS_GUIDE.md`](training/RUN_PROGRESS_GUIDE.md)에 정리했습니다. 현재 앱과 호환되는 Initial 한 점 정규화는 H2 exact 71.4%/stage-balanced 50.4%, RH exact 67.9%/stage-balanced 46.6%였습니다. 알려진 고농도 기준을 추가한 직선형 two-anchor 정규화는 두 축 모두 악화되어, 중간 색 궤적이 단순한 저농도-고농도 직선이 아님을 확인했습니다. 이 후보들은 아직 앱에 배포하지 않았습니다.
 
+중간 농도 endpoint를 독립 run별로 같은 방향·크기로 비교한 시트와 사용 데이터 흐름은 [`training/MIDDLE_ENDPOINT_REVIEW_GUIDE.md`](training/MIDDLE_ENDPOINT_REVIEW_GUIDE.md)에 정리했습니다. H2 2/3%와 RH 40/50/60/80%에서 원본 endpoint, 실제 형상 마스크, held-out 예측 및 경로 진행률을 함께 표시합니다. 이번 대상의 ROI는 도형을 제대로 덮고 있어, 남은 큰 오차는 주로 빠른 endpoint의 반응 지연과 run별 비직선 색 경로에서 발생합니다. 이 검토 결과로 타임라인을 자동 수정하지 않으며 사람 판정 뒤 exact/interval/제외 A/B를 수행합니다.
+
 `training/inspect_reference_patches.py`는 회전 정규화 뒤 위-오른쪽과 아래-왼쪽의 흰색/회색 패치를 직접 검출해 시각 QA를 생성합니다. 이 패치는 학습 영상 촬영 안정화를 위한 것이며 실제 앱 촬영에는 없으므로 배포 입력이나 모델 특징으로 요구하지 않습니다. 패치 색을 고정 LAB 값으로 강제하는 보정은 전체 ramp 점수를 소폭 높였지만 4% endpoint를 크게 낮췄고, 패치 제거 또는 두 패치 중심 미세 정렬도 held-out 성능을 낮췄습니다. 따라서 관련 실험은 audit 코드로만 보존하며 배포 특징 추출기는 기존 중성 픽셀 보정과 원형 ROI/quarter-turn 정렬을 유지합니다.
 
 사용자가 정렬한 `_cropped` 영상은 원 타임라인을 유지한 별도 cache로 A/B 평가할 수 있습니다. 단순 원본 대체와 원본+crop 증강은 동일 run 블록 점수는 높였지만 독립 영상 held-out 점수를 낮춰 배포하지 않았습니다. 상세 수치와 원 검출 기하 문제는 [`training/CROPPED_VIDEO_AUDIT.md`](training/CROPPED_VIDEO_AUDIT.md)에 기록했습니다.
