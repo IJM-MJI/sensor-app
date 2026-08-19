@@ -72,3 +72,26 @@ The next experiment is a stable droplet-background rejection method evaluated
 with this same whole-run held-out A/B. It must retain the corrected non-overlap
 boundary and may be deployed only if RH exact, stage-balanced, within-one-stage,
 and MAE improve together.
+
+## Droplet-background experiments
+
+Two stable candidates were tested without changing the supplied timelines:
+
+- Keeping only the most colour-distant 15% of the droplet box made the review
+  mask cleaner, but removed weak low-RH response pixels. RH video-held-out exact
+  fell to 20.1%, stage-balanced to 19.8%, and MAE rose to 23.64%p.
+- A fixed two-ellipse template covering the large and satellite droplets kept
+  the weak pixels and reduced gross errors. Exact was 22.5% and stage-balanced
+  22.5%, while within-one-stage improved to 46.5% and MAE to 17.00%p.
+
+Combining the legacy and template features in one model overfit run identity
+(20.6% exact), and blending their held-out predictions did not improve exact and
+balanced accuracy together. None of these candidates replaces the deployed RH
+model. The review tool retains `--drop-percentile` and `--drop-template` so the
+experiments can be reproduced without changing the production extractor.
+
+The result indicates that the next useful step is per-run rigid registration:
+estimate the sample/card translation and small rotation once from the calibration
+photo, then apply the same transformed droplet template to the measurement photo.
+This should preserve the template's lower MAE without losing exact stage detail
+to position mismatch.

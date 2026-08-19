@@ -616,7 +616,12 @@ def lock_orientation(
     return chosen, float(votes[chosen] / votes.sum())
 
 
-def shape_pixel_mask(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) -> np.ndarray:
+def shape_pixel_mask(
+    lab: np.ndarray,
+    zone: np.ndarray,
+    background: np.ndarray,
+    percentile: float = 65.0,
+) -> np.ndarray:
     """Return the exact high-distance pixels used for one sensing shape."""
     ys, xs = np.where(zone)
     pixels = lab[ys, xs]
@@ -628,7 +633,7 @@ def shape_pixel_mask(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) 
         + (pixels[:, 1] - background[1]) ** 2
         + (pixels[:, 2] - background[2]) ** 2
     )
-    cutoff = max(6.0, float(np.percentile(distance, 65)))
+    cutoff = max(6.0, float(np.percentile(distance, percentile)))
     shape = pixels[distance >= cutoff]
     if len(shape) < 12:
         selected = np.argsort(distance)[-max(12, len(pixels) // 5):]
@@ -638,11 +643,27 @@ def shape_pixel_mask(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) 
     return output
 
 
-def masked_shape_pixels(lab: np.ndarray, zone: np.ndarray, background: np.ndarray) -> np.ndarray:
-    selected = shape_pixel_mask(lab, zone, background)
+def masked_shape_pixels(
+    lab: np.ndarray,
+    zone: np.ndarray,
+    background: np.ndarray,
+    percentile: float = 65.0,
+) -> np.ndarray:
+    selected = shape_pixel_mask(lab, zone, background, percentile)
     if not np.any(selected):
         return np.repeat(background[None, :], 20, axis=0)
     return lab[selected]
+
+
+def droplet_template_zone(
+    chamber_mask: np.ndarray,
+    nx: np.ndarray,
+    ny: np.ndarray,
+) -> np.ndarray:
+    """Stable geometric support for the large and small printed droplets."""
+    main = ((nx + .08) / .27) ** 2 + ((ny - .43) / .30) ** 2 <= 1.0
+    satellite = ((nx - .24) / .14) ** 2 + ((ny - .45) / .18) ** 2 <= 1.0
+    return chamber_mask & (main | satellite)
 
 
 def shape_summary(shape: np.ndarray, prefix: str) -> tuple[np.ndarray, dict[str, float]]:
