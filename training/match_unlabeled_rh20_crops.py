@@ -32,18 +32,29 @@ def smooth(values, width=9):
                        np.ones(width) / width, mode="valid")
 
 
-def automatic_rising_prefix(features, atlas_features):
-    """Find the optical peak without using a reaction timestamp."""
-    initial = np.median(features[:min(7, len(features))], axis=0)
+def automatic_response_segment(features, atlas_features):
+    """Use only the known Initial -> Reaction -> Recovery phase order."""
+    window = min(9, max(3, len(features) // 12))
+    initial = np.median(features[:window], axis=0)
+    recovery = np.median(features[-window:], axis=0)
     scale = np.maximum(np.percentile(abs(atlas_features - atlas_features[0]), 75, axis=0), .2)
-    strength = np.sqrt(np.mean(((features - initial) / scale) ** 2, axis=1))
+    from_initial = np.sqrt(np.mean(((features - initial) / scale) ** 2, axis=1))
+    from_recovery = np.sqrt(np.mean(((features - recovery) / scale) ** 2, axis=1))
+    # A recovery endpoint may not equal the initial colour exactly. Distance to
+    # the nearer endpoint baseline still isolates the intervening response.
+    strength = np.minimum(from_initial, from_recovery)
     filtered = smooth(strength)
-    maximum = float(np.max(filtered))
-    # Earliest near-maximum avoids treating a long high-response hold as extra ramp.
-    candidates = np.where(filtered >= .98 * maximum)[0]
-    peak = int(candidates[0]) if len(candidates) else int(np.argmax(filtered))
-    peak = max(peak, min(6, len(features) - 1))
-    return peak, strength, filtered
+    peak = int(np.argmax(filtered))
+    baseline_values = np.r_[filtered[:window], filtered[-window:]]
+    floor = float(np.percentile(baseline_values, 90))
+    threshold = floor + .20 * max(float(filtered[peak]) - floor, 0)
+    before = np.where(filtered[:peak + 1] <= threshold)[0]
+    start = int(before[-1] + 1) if len(before) else 0
+    after = np.where(filtered[peak:] <= threshold)[0]
+    end = int(peak + after[0]) if len(after) else len(features) - 1
+    if end - start < 6:
+        start, end = max(0, peak - 3), min(len(features) - 1, peak + 3)
+    return start, end, peak, strength, filtered, threshold
 
 
 def stage_confidence(costs, atlas_levels, selected_indices):
@@ -84,8 +95,9 @@ def main():
     for axis_row, (group, rows) in enumerate(sorted(by_group.items())):
         rows.sort(key=lambda row: float(row["time"]))
         features = np.asarray([trajectory_feature(row, "H2") for row in rows])
-        peak, strength, filtered = automatic_rising_prefix(features, atlas_features)
-        rising_rows = rows[:peak + 1]; rising_features = features[:peak + 1]
+        start, end, peak, strength, filtered, threshold = automatic_response_segment(
+            features, atlas_features)
+        rising_rows = rows[start:end + 1]; rising_features = features[start:end + 1]
         costs = cost_matrix(rising_features, atlas_features)
         indices = monotonic_match(costs, "up")
         confidence, mutual = stage_confidence(costs, atlas_levels, indices)
@@ -101,12 +113,14 @@ def main():
                 "optical_equivalent_h2": float(optical), "pseudo_stage": float(stage),
                 "match_cost": float(cost), "stage_confidence": float(conf),
                 "mutual_nearest": bool(is_mutual), "training_candidate": bool(use),
-                "reaction_peak_time_detected": float(rows[peak]["time"]),
+                "reaction_start_time_detected": float(rows[start]["time"]),
+                "reaction_end_time_detected": float(rows[end]["time"]),
             })
         report["groups"][group] = {
             "video": str(rows[0]["video"]), "n_total_frames": len(rows),
             "n_rising_frames": len(rising_rows),
-            "reaction_peak_time_detected": float(rows[peak]["time"]),
+            "reaction_start_time_detected": float(rows[start]["time"]),
+            "reaction_end_time_detected": float(rows[end]["time"]),
             "optical_max_h2": float(np.max(matched)),
             "pseudo_stage_max": float(np.max(stages)),
             "training_candidates": int(np.sum(eligible)),
@@ -115,8 +129,9 @@ def main():
         times = np.asarray([float(row["time"]) for row in rows])
         axes[axis_row, 0].plot(times, strength, alpha=.4, label="raw change")
         axes[axis_row, 0].plot(times, filtered, label="smoothed change")
-        axes[axis_row, 0].axvline(float(rows[peak]["time"]), color="crimson", linestyle="--",
-                                 label="auto peak")
+        axes[axis_row, 0].axhline(threshold, color="gray", linestyle=":", label="phase threshold")
+        axes[axis_row, 0].axvspan(float(rows[start]["time"]), float(rows[end]["time"]),
+                                 color="crimson", alpha=.10, label="auto Reaction")
         axes[axis_row, 0].set_title(group); axes[axis_row, 0].set_ylabel("Flame change")
         axes[axis_row, 0].legend(fontsize=7, frameon=False)
         axes[axis_row, 1].plot([float(row["time"]) for row in rising_rows], matched,

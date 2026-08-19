@@ -12,7 +12,9 @@ VIDEOS = {
     "1_90_RH20_2_x2_cropped.mp4": "rh20-crop-run-2",
     "1_90_RH20_3_x2_cropped.mp4": "rh20-crop-run-3",
     "1_90_RH20_4_cropped.mp4": "rh20-crop-run-4",
-    "1_90_RH20_5_x2_cropped.mp4": "rh20-crop-run-5",
+    # Prefer the normal-speed source: it contains temporal samples skipped by
+    # the x2 export. Both exports remain one source group for held-out splits.
+    "1_90_RH20_cropped.mp4": "rh20-crop-run-5",
 }
 
 

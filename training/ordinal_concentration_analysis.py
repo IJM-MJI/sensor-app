@@ -241,7 +241,7 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
         "1_90_RH20_2_x2_cropped.mp4": (0.0, 60.0),
         "1_90_RH20_3_x2_cropped.mp4": (0.0, 60.0),
         "1_90_RH20_4_cropped.mp4": (0.0, 120.0),
-        "1_90_RH20_5_x2_cropped.mp4": (0.0, 54.0),
+        "1_90_RH20_cropped.mp4": (0.0, 108.0),
     })
     # Timeline-free test_2 optical matching does not force every run to 4%.
     # These maxima are deliberately reference-equivalent pseudo targets; the
@@ -250,8 +250,12 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
         "1_90_RH20_2_x2_cropped.mp4": 3.95,
         "1_90_RH20_3_x2_cropped.mp4": 3.25,
         "1_90_RH20_4_cropped.mp4": 2.75,
-        "1_90_RH20_5_x2_cropped.mp4": 1.0,
+        "1_90_RH20_cropped.mp4": 1.0,
     }
+    # The normal-speed run-5 source yields twice as many adjacent frames as
+    # its x2 export at the same playback sampling rate. Preserve those extra
+    # time points without letting one experimental run receive double weight.
+    density_weight = {"1_90_RH20_cropped.mp4": .5}
     for row in rows:
         ramp = ramps.get(str(row["video"]))
         if ramp is None:
@@ -272,7 +276,8 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25):
         # A cropped optical maximum is itself a pseudo-label, not a gas-meter
         # endpoint. Keep its endpoint weight weak as well.
         if str(row["video"]) in optical_max:
-            row["sample_weight_factor"] = float(interior_weight)
+            row["sample_weight_factor"] = (
+                float(interior_weight) * density_weight.get(str(row["video"]), 1.0))
         else:
             row["sample_weight_factor"] = 1.0 if endpoint_distance <= 1.0 else float(interior_weight)
 
