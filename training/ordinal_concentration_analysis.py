@@ -225,7 +225,7 @@ def assign_rh_ramp_targets(rows):
 
 def assign_rh20_h2_weak_targets(
         rows, interior_weight=.25, progress_mode="time", recovery_tail_seconds=0.0,
-        reviewed_quality_profile="equal"):
+        reviewed_quality_profile="equal", reviewed_stages=(0, 1, 2, 3, 4)):
     """Use simultaneous RH20 as H2-only ordered/range supervision.
 
     Reaction boundaries establish H2 0% and 4%. Interior percentages are only a
@@ -329,6 +329,8 @@ def assign_rh20_h2_weak_targets(
             if boundaries is None or time < reaction_start or time > reaction_end:
                 continue
             stage = float(np.searchsorted(boundaries, time, side="right"))
+            if int(stage) not in reviewed_stages:
+                continue
             row["h2_value"] = row["continuous_target"] = row["analysis_stage"] = stage
             row["analysis_phase"] = "reaction"
             row["weak_supervision"] = True
@@ -723,11 +725,15 @@ def main():
                         help="label only the final fully recovered tail as H2 0%")
     parser.add_argument("--rh20-reviewed-quality-profile", choices=("equal", "user"),
                         default="equal", help="downweight user-rated medium-quality run 3")
+    parser.add_argument("--rh20-reviewed-stages", default="0,1,2,3,4",
+                        help="comma-separated reviewed stages allowed as weak supervision")
     parser.add_argument("--replace-rh20-with-augment", action="store_true",
                         help="remove original RH20 clips before appending cropped replacements")
     parser.add_argument("--retain-original-rh20-starts", action="store_true",
                         help="with replacement, keep only original H2=0 start anchors")
     args = parser.parse_args()
+    reviewed_stages = tuple(int(value.strip()) for value in args.rh20_reviewed_stages.split(",")
+                            if value.strip())
     output = args.output
     output.mkdir(parents=True, exist_ok=True)
     rows = read_csv(args.cache)
@@ -752,7 +758,8 @@ def main():
     if args.include_rh20_h2:
         assign_rh20_h2_weak_targets(
             rows, args.rh20_interior_weight, args.rh20_progress_mode,
-            args.rh20_recovery_tail_seconds, args.rh20_reviewed_quality_profile)
+            args.rh20_recovery_tail_seconds, args.rh20_reviewed_quality_profile,
+            reviewed_stages)
     reports, paths, all_predictions, deployed_models = {}, {}, [], {}
     for task, config in TASKS.items():
         task_rows = [row for row in rows
