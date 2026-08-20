@@ -28,12 +28,13 @@ def main():
     parser.add_argument("--cropped-optical", type=Path, required=True)
     parser.add_argument("--optical-path", type=Path,
                         help="optional within-run isotonic optical-path candidate")
+    parser.add_argument("--optical-path-label", default="Optical path, weight 0.05")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(); args.output.parent.mkdir(parents=True, exist_ok=True)
     cases = [("Original RH20 ramp", selected(args.original)),
              ("Cropped, unforced optical max", selected(args.cropped_optical))]
     if args.optical_path:
-        cases.append(("Optical path, weight 0.05", selected(args.optical_path)))
+        cases.append((args.optical_path_label, selected(args.optical_path)))
     colours = ["#4C78A8", "#F58518", "#54A24B"]
     fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.3), constrained_layout=True)
     metrics_names = ["Exact", "Balanced", "Within ±1"]

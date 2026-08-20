@@ -223,7 +223,8 @@ def assign_rh_ramp_targets(rows):
         row["rh_analysis_stage"] = float(levels[np.argmin(np.abs(levels - continuous))])
 
 
-def assign_rh20_h2_weak_targets(rows, interior_weight=.25, progress_mode="time"):
+def assign_rh20_h2_weak_targets(
+        rows, interior_weight=.25, progress_mode="time", recovery_tail_seconds=0.0):
     """Use simultaneous RH20 as H2-only ordered/range supervision.
 
     Reaction boundaries establish H2 0% and 4%. Interior percentages are only a
@@ -239,10 +240,11 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25, progress_mode="time")
     # User-cropped RH20 clips retain their source timing. Run 4 is the normal-
     # speed counterpart of the existing x2 clip, so its boundary is doubled.
     ramps.update({
-        "1_90_RH20_2_x2_cropped.mp4": (0.0, 60.0),
+        "1_90_RH20_2_x2_cropped.mp4": (10.0, 60.0),
         "1_90_RH20_3_x2_cropped.mp4": (0.0, 60.0),
         "1_90_RH20_4_cropped.mp4": (0.0, 120.0),
-        "1_90_RH20_cropped.mp4": (0.0, 108.0),
+        "1_90_RH20_5_x2_cropped.mp4": (0.0, 54.0),
+        "1_90_RH20_cropped.mp4": (0.0, 90.0),
     })
     # Timeline-free test_2 optical matching does not force every run to 4%.
     # These maxima are deliberately reference-equivalent pseudo targets; the
@@ -251,12 +253,20 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25, progress_mode="time")
         "1_90_RH20_2_x2_cropped.mp4": 3.95,
         "1_90_RH20_3_x2_cropped.mp4": 3.25,
         "1_90_RH20_4_cropped.mp4": 2.75,
+        "1_90_RH20_5_x2_cropped.mp4": 1.0,
         "1_90_RH20_cropped.mp4": 1.0,
     }
     # The normal-speed run-5 source yields twice as many adjacent frames as
     # its x2 export at the same playback sampling rate. Preserve those extra
     # time points without letting one experimental run receive double weight.
     density_weight = {"1_90_RH20_cropped.mp4": .5}
+    recovery_end = {
+        "1_90_RH20_2_x2_cropped.mp4": 85.0,
+        "1_90_RH20_3_x2_cropped.mp4": 97.0,
+        "1_90_RH20_4_cropped.mp4": 180.0,
+        "1_90_RH20_5_x2_cropped.mp4": 107.0,
+        "1_90_RH20_cropped.mp4": 214.0,
+    }
     optical_progress = {}
     if progress_mode == "optical":
         # Infer only the order within each reaction. Endpoints still come from
@@ -299,6 +309,13 @@ def assign_rh20_h2_weak_targets(rows, interior_weight=.25, progress_mode="time")
         time = float(row["time"])
         reaction_start, reaction_end = ramp
         if time < reaction_start or time > reaction_end:
+            end = recovery_end.get(str(row["video"]))
+            if (recovery_tail_seconds > 0 and end is not None
+                    and end - recovery_tail_seconds <= time <= end):
+                row["h2_value"] = row["continuous_target"] = row["analysis_stage"] = 0.0
+                row["analysis_phase"] = "recovered"
+                row["weak_supervision"] = True
+                row["sample_weight_factor"] = density_weight.get(str(row["video"]), 1.0)
             continue
         progress = optical_progress.get(
             (str(row["video"]), time),
@@ -671,6 +688,8 @@ def main():
                         help="training weight for uncertain RH20 ramp-interior stages")
     parser.add_argument("--rh20-progress-mode", choices=("time", "optical"), default="time",
                         help="assign cropped RH20 interior order by time or within-run optical path")
+    parser.add_argument("--rh20-recovery-tail-seconds", type=float, default=0.0,
+                        help="label only the final fully recovered tail as H2 0%")
     parser.add_argument("--replace-rh20-with-augment", action="store_true",
                         help="remove original RH20 clips before appending cropped replacements")
     parser.add_argument("--retain-original-rh20-starts", action="store_true",
@@ -699,7 +718,8 @@ def main():
     assign_rh_ramp_targets(rows)
     if args.include_rh20_h2:
         assign_rh20_h2_weak_targets(
-            rows, args.rh20_interior_weight, args.rh20_progress_mode)
+            rows, args.rh20_interior_weight, args.rh20_progress_mode,
+            args.rh20_recovery_tail_seconds)
     reports, paths, all_predictions, deployed_models = {}, {}, [], {}
     for task, config in TASKS.items():
         task_rows = [row for row in rows
@@ -710,7 +730,10 @@ def main():
             # while purging. Recovery has a different hysteretic colour path and
             # only two independent runs, so it must not supervise H2 quantitation.
             task_rows = [row for row in task_rows
-                         if "analysis_stage" in row and row.get("analysis_phase") == "reaction"]
+                         if "analysis_stage" in row and (
+                             row.get("analysis_phase") == "reaction"
+                             or (row.get("weak_supervision")
+                                 and row.get("analysis_phase") == "recovered"))]
         paths[task] = colour_path([row for row in task_rows if not row.get("weak_supervision")], config)
         models, predictions, within_run_models, within_run_predictions = {}, {}, {}, {}
         for name, estimator in candidates().items():

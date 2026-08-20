@@ -59,6 +59,23 @@ regression으로 `Initial → Response` 단조 경로를 강제하는 optical-pa
 leave-one-video-out lookup 앙상블도 공통 687프레임에서 exact 48.0%, ±1단계 89.2%,
 MAE 0.655%p로 실패했다. 따라서 optical-path는 연구 후보로만 보존하고 배포하지 않는다.
 
+## 사용자 확인 Reaction/Recovery 경계
+
+| 영상 | Reaction | Recovery |
+|---|---:|---:|
+| `1_90_RH20_5_x2_cropped.mp4` | 0--54 s | 54--107 s |
+| `1_90_RH20_4_cropped.mp4` | 0--120 s | 120--180 s |
+| `1_90_RH20_2_x2_cropped.mp4` | 10--60 s | 60--85 s |
+| `1_90_RH20_3_x2_cropped.mp4` | 0--60 s | 60--97 s |
+| `1_90_RH20_cropped.mp4` | 0--90 s | 90--214 s |
+
+이 경계를 적용해 run 5 normal/x2를 별도 A/B했다. Reaction 시간에 선형 비례한 약라벨은
+x2/normal exact가 33.2%/40.4%로 실패했다. 같은 경계 안에서 optical path와 0.05 가중치를
+사용하면 x2는 43.1%, normal은 49.1%였다. normal 후보의 balanced 48.6%, ±1단계
+93.4%, MAE 0.582%p는 기존 최선의 48.6%, 96.8%, 0.554%p보다 전반적으로 낫지 않다.
+Recovery 마지막 5초만 완전 회복 0% anchor로 추가한 조건도 exact 45.3%로 하락했다.
+따라서 확인된 경계는 phase 분리에는 채택하되 기존 배포 모델은 유지한다.
+
 | H2 단계 | 기존 recall | Crop optical recall |
 |---:|---:|---:|
 | 0% | 98.7% | 42.1% |
