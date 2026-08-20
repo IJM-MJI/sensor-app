@@ -27,7 +27,7 @@ def read_selected(path: Path, model: str):
 
 
 def align_rows(baseline, optical):
-    """Align equal-rate exports despite sub-frame timestamp rounding changes."""
+    """Align the common evaluated timestamps when one model censors weak rows."""
     by_video_a, by_video_b = {}, {}
     for row in baseline: by_video_a.setdefault(row["video"], []).append(row)
     for row in optical: by_video_b.setdefault(row["video"], []).append(row)
@@ -35,9 +35,11 @@ def align_rows(baseline, optical):
     for video in sorted(set(by_video_a) & set(by_video_b)):
         left = sorted(by_video_a[video], key=lambda row: float(row["time"]))
         right = sorted(by_video_b[video], key=lambda row: float(row["time"]))
-        if len(left) != len(right):
-            raise ValueError(f"Frame count differs for {video}: {len(left)} vs {len(right)}")
-        aligned.extend(zip(left, right))
+        right_by_time = {round(float(row["time"]), 4): row for row in right}
+        for row in left:
+            match = right_by_time.get(round(float(row["time"]), 4))
+            if match is not None:
+                aligned.append((row, match))
     return aligned
 
 

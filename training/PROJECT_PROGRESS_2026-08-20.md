@@ -64,6 +64,15 @@ the timeline label is correct and must be separated from label-validity review.
 - Paper figures: validation plots/confusion matrices exist; final figures must
   wait for the selected H2/RH/simultaneous models.
 
+## Verified H2 reference correction
+
+Human review confirmed `H2_only_test` at 2 s as H2 0%. Run 4 and run 5 did not
+reach 4%; their late response is now treated as weak 2--3% interval evidence,
+not exact validation. With leakage-safe folds and weight .002, the corrected
+model obtains exact .528, balanced .525, within-one-stage .929, and 0%/4%
+recalls .658/.832. It is scientifically cleaner but still weak at 2%/3%, so it
+has not replaced the app model.
+
 ## Next actions
 
 1. Human-mark the ten atlas endpoints as `VALID`, `PARTIAL RESPONSE`, or

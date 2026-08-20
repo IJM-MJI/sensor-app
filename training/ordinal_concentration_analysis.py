@@ -235,6 +235,39 @@ def apply_h2_endpoint_training_profile(rows, profile):
             float(row.get("sample_weight_factor", 1.0)) * factor)
 
 
+def apply_h2_verified_partial_response(rows, profile, weight=.002):
+    """Use user-verified gas-shortage runs as weak 2--3% interval evidence.
+
+    Run 4 and run 5 did not visibly reach 4%. Their late frames remain useful
+    illumination domains, but they must not define or validate the exact 4%
+    class. A capped pseudo-ramp supplies low-weight ordering inside the verified
+    2--3% interval; exact held-out scoring excludes these rows.
+    """
+    if profile == "none":
+        return
+    specs = {
+        "1_90_H2_only_4.mp4": (30.0, 122.0, 2.0, 2.5),
+        "1_90_H2_only_5.mp4": (13.0, 130.0, 2.0, 2.8),
+    }
+    for row in rows:
+        spec = specs.get(str(row["video"]))
+        if spec is None or row.get("analysis_phase") != "reaction":
+            continue
+        start, end, lower, upper_target = spec
+        time = float(row["time"])
+        if time <= start:
+            continue
+        progress = float(np.clip((time - start) / max(end - start, 1e-6), 0, 1))
+        continuous = lower + progress * (upper_target - lower)
+        row["continuous_target"] = continuous
+        row["analysis_stage"] = float(np.clip(np.floor(continuous + .5), 0, 4))
+        row["weak_supervision"] = True
+        row["partial_response_lower"] = 2.0
+        row["partial_response_upper"] = 3.0
+        row["sample_weight_factor"] = (
+            float(row.get("sample_weight_factor", 1.0)) * float(weight))
+
+
 def apply_h2_frame_quality_profile(rows, profile):
     """Downweight isolated optical jumps while retaining every run and stage."""
     if profile == "none":
@@ -628,7 +661,9 @@ def evaluate(rows, config, estimator, name, protocol="video_holdout"):
     prediction = np.full(len(y), np.nan)
     confidence = np.full(len(y), np.nan)
     if protocol == "video_holdout":
-        splits = [((groups != group) | ~strong, (groups == group) & strong)
+        # Weak rows from a partially labelled strong run must not leak that
+        # held-out run's optical domain into training.
+        splits = [((groups != group), (groups == group) & strong)
                   for group in sorted(set(groups[strong]))]
     elif protocol == "within_run_blocks":
         # Five-second blocks prevent adjacent frames from being split individually,
@@ -639,7 +674,9 @@ def evaluate(rows, config, estimator, name, protocol="video_holdout"):
         splitter = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=42)
         splits = []
         for train_local, test_local in splitter.split(x[strong], y[strong], groups=blocks):
-            train = ~strong.copy(); test = np.zeros(len(rows), dtype=bool)
+            test_groups = set(groups[strong_index[test_local]])
+            train = (~strong) & ~np.isin(groups, list(test_groups))
+            test = np.zeros(len(rows), dtype=bool)
             train[strong_index[train_local]] = True
             test[strong_index[test_local]] = True
             splits.append((train, test))
@@ -825,6 +862,11 @@ def main():
     parser.add_argument("--h2-frame-quality-profile", choices=("none", "local_path"),
                         default="none",
                         help="downweight isolated within-run optical path outliers")
+    parser.add_argument("--h2-partial-response-profile",
+                        choices=("none", "verified_run4_run5"), default="none",
+                        help="treat user-verified run 4/5 late response as weak 2-3%")
+    parser.add_argument("--h2-partial-response-weight", type=float, default=.002,
+                        help="training weight for verified 2-3% partial-response rows")
     args = parser.parse_args()
     H2_FEATURE_PROFILE = args.h2_feature_profile
     reviewed_stages = tuple(int(value.strip()) for value in args.rh20_reviewed_stages.split(",")
@@ -850,6 +892,8 @@ def main():
     add_stability(rows)
     assign_h2_ramp_targets(rows)
     apply_h2_endpoint_training_profile(rows, args.h2_endpoint_training_profile)
+    apply_h2_verified_partial_response(
+        rows, args.h2_partial_response_profile, args.h2_partial_response_weight)
     apply_h2_frame_quality_profile(rows, args.h2_frame_quality_profile)
     assign_rh_ramp_targets(rows)
     if args.include_rh20_h2:
