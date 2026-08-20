@@ -203,6 +203,33 @@ def assign_h2_ramp_targets(rows):
             row["analysis_phase"] = "reaction"
 
 
+def apply_h2_endpoint_training_profile(rows, profile):
+    """Suppress suspect endpoint labels in training without removing validation rows.
+
+    These factors are consumed only by the fitted estimator. The rows remain in
+    every held-out fold, so this quality-control experiment cannot improve the
+    reported score merely by hiding difficult recordings from evaluation.
+    """
+    if profile == "none":
+        return
+    for row in rows:
+        if row.get("kind") != "h2_only" or "analysis_stage" not in row:
+            continue
+        video = str(row["video"])
+        stage = int(float(row["analysis_stage"]))
+        factor = 1.0
+        # Daylight run 5 has mutually inconsistent 0% and 4% endpoints and may
+        # not have received enough H2. Run 4 contains only a very short 4% hold.
+        if video == "1_90_H2_only_5.mp4" and stage in (0, 4):
+            factor = 1e-6
+        if video == "1_90_H2_only_4.mp4" and stage == 4:
+            factor = 1e-6
+        if profile == "exclude_run5" and video == "1_90_H2_only_5.mp4":
+            factor = 1e-6
+        row["sample_weight_factor"] = (
+            float(row.get("sample_weight_factor", 1.0)) * factor)
+
+
 def assign_rh_ramp_targets(rows):
     """Replace the old plateau labels with endpoint-interpolated RH targets."""
     levels = np.asarray(TASKS["RH"]["levels"], dtype=float)
@@ -731,6 +758,10 @@ def main():
                         help="remove original RH20 clips before appending cropped replacements")
     parser.add_argument("--retain-original-rh20-starts", action="store_true",
                         help="with replacement, keep only original H2=0 start anchors")
+    parser.add_argument("--h2-endpoint-training-profile",
+                        choices=("none", "suspect_endpoints", "exclude_run5"),
+                        default="none",
+                        help="near-zero-weight suspect H2 endpoint labels in training only")
     args = parser.parse_args()
     reviewed_stages = tuple(int(value.strip()) for value in args.rh20_reviewed_stages.split(",")
                             if value.strip())
@@ -754,6 +785,7 @@ def main():
     rows.extend(augment_rows)
     add_stability(rows)
     assign_h2_ramp_targets(rows)
+    apply_h2_endpoint_training_profile(rows, args.h2_endpoint_training_profile)
     assign_rh_ramp_targets(rows)
     if args.include_rh20_h2:
         assign_rh20_h2_weak_targets(
