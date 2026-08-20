@@ -76,6 +76,10 @@ x2/normal exact가 33.2%/40.4%로 실패했다. 같은 경계 안에서 optical 
 Recovery 마지막 5초만 완전 회복 0% anchor로 추가한 조건도 exact 45.3%로 하락했다.
 따라서 확인된 경계는 phase 분리에는 채택하되 기존 배포 모델은 유지한다.
 
+`make_rh20_boundary_review.py`는 각 run의 시간 비례 경계와 optical-path 경계를
+`H2_only_test_2`의 인접 단계 기준 프레임 사이에 배치한다. 총 12개 경계이며 검토자는 각
+행에서 가운데 `TIME`/`OPTICAL` 중 더 타당한 후보 또는 `둘 다 아님`만 선택하면 된다.
+
 | H2 단계 | 기존 recall | Crop optical recall |
 |---:|---:|---:|
 | 0% | 98.7% | 42.1% |
