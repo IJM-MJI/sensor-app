@@ -224,7 +224,8 @@ def assign_rh_ramp_targets(rows):
 
 
 def assign_rh20_h2_weak_targets(
-        rows, interior_weight=.25, progress_mode="time", recovery_tail_seconds=0.0):
+        rows, interior_weight=.25, progress_mode="time", recovery_tail_seconds=0.0,
+        reviewed_quality_profile="equal"):
     """Use simultaneous RH20 as H2-only ordered/range supervision.
 
     Reaction boundaries establish H2 0% and 4%. Interior percentages are only a
@@ -267,6 +268,21 @@ def assign_rh20_h2_weak_targets(
         "1_90_RH20_5_x2_cropped.mp4": 107.0,
         "1_90_RH20_cropped.mp4": 214.0,
     }
+    # User-reviewed midpoint crossings from the side-by-side boundary sheets.
+    # Run 2 is deliberately absent: its selected 0->1 and 1->2 times were
+    # temporally reversed, consistent with the user's low-confidence rating.
+    reviewed_boundaries = {
+        "1_90_RH20_3_x2_cropped.mp4": [6.5, 7.5, 28.5],
+        "1_90_RH20_4_cropped.mp4": [22.0, 65.5, 109.0],
+        "1_90_RH20_5_x2_cropped.mp4": [22.5],
+        "1_90_RH20_cropped.mp4": [47.0],
+    }
+    reviewed_quality = {
+        "1_90_RH20_3_x2_cropped.mp4": .5,
+        "1_90_RH20_4_cropped.mp4": 1.0,
+        "1_90_RH20_5_x2_cropped.mp4": 1.0,
+        "1_90_RH20_cropped.mp4": 1.0,
+    }
     optical_progress = {}
     if progress_mode == "optical":
         # Infer only the order within each reaction. Endpoints still come from
@@ -308,6 +324,20 @@ def assign_rh20_h2_weak_targets(
             continue
         time = float(row["time"])
         reaction_start, reaction_end = ramp
+        if progress_mode == "reviewed":
+            boundaries = reviewed_boundaries.get(str(row["video"]))
+            if boundaries is None or time < reaction_start or time > reaction_end:
+                continue
+            stage = float(np.searchsorted(boundaries, time, side="right"))
+            row["h2_value"] = row["continuous_target"] = row["analysis_stage"] = stage
+            row["analysis_phase"] = "reaction"
+            row["weak_supervision"] = True
+            row["reviewed_boundary_supervision"] = True
+            row["sample_weight_factor"] = (
+                float(interior_weight) * density_weight.get(str(row["video"]), 1.0)
+                * (reviewed_quality.get(str(row["video"]), 1.0)
+                   if reviewed_quality_profile == "user" else 1.0))
+            continue
         if time < reaction_start or time > reaction_end:
             end = recovery_end.get(str(row["video"]))
             if (recovery_tail_seconds > 0 and end is not None
@@ -686,10 +716,13 @@ def main():
                         help="add RH20 simultaneous reactions as weak H2 0-to-4 supervision")
     parser.add_argument("--rh20-interior-weight", type=float, default=.25,
                         help="training weight for uncertain RH20 ramp-interior stages")
-    parser.add_argument("--rh20-progress-mode", choices=("time", "optical"), default="time",
+    parser.add_argument("--rh20-progress-mode", choices=("time", "optical", "reviewed"),
+                        default="time",
                         help="assign cropped RH20 interior order by time or within-run optical path")
     parser.add_argument("--rh20-recovery-tail-seconds", type=float, default=0.0,
                         help="label only the final fully recovered tail as H2 0%")
+    parser.add_argument("--rh20-reviewed-quality-profile", choices=("equal", "user"),
+                        default="equal", help="downweight user-rated medium-quality run 3")
     parser.add_argument("--replace-rh20-with-augment", action="store_true",
                         help="remove original RH20 clips before appending cropped replacements")
     parser.add_argument("--retain-original-rh20-starts", action="store_true",
@@ -719,7 +752,7 @@ def main():
     if args.include_rh20_h2:
         assign_rh20_h2_weak_targets(
             rows, args.rh20_interior_weight, args.rh20_progress_mode,
-            args.rh20_recovery_tail_seconds)
+            args.rh20_recovery_tail_seconds, args.rh20_reviewed_quality_profile)
     reports, paths, all_predictions, deployed_models = {}, {}, [], {}
     for task, config in TASKS.items():
         task_rows = [row for row in rows

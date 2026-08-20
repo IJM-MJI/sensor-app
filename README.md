@@ -93,6 +93,10 @@ Reaction 내부 불꽃 색을 단조 optical path로 정렬하고 약라벨 가�
 
 사용자가 확인한 RH20 cropped Reaction/Recovery 경계를 반영한 재검증에서도 normal-speed optical-path 후보는 exact 49.1%였지만 ±1단계와 MAE가 기존 최선보다 나빴습니다. Reaction 시간에 선형 비례한 라벨과 Recovery-tail 0% anchor는 각각 최대 exact 40.4%, 45.3%로 실패했습니다. 확인 경계는 phase 분리에만 채택하고 Recovery는 H2 농도 학습에서 제외합니다.
 
+경계 시트 사용자 판정에서는 환경상 불명확하고 선택 순서도 역전된 run 2를 제외했습니다. run 3·4·5의 검토 경계를 0.02 가중치로 추가한 normal 대표본 후보는 H2 held-out exact 51.1%, balanced 52.5%, MAE 0.547%p로 개선됐지만 ±1단계가 94.3%로 기존 96.8%보다 낮아 배포하지 않았습니다.
+
+run 3을 run 4/5보다 낮게 평가한 사용자 품질 순서도 별도 가중치 profile로 검증했지만 전체 지표는 개선되지 않았습니다.
+
 `training/inspect_reference_patches.py`는 회전 정규화 뒤 위-오른쪽과 아래-왼쪽의 흰색/회색 패치를 직접 검출해 시각 QA를 생성합니다. 이 패치는 학습 영상 촬영 안정화를 위한 것이며 실제 앱 촬영에는 없으므로 배포 입력이나 모델 특징으로 요구하지 않습니다. 패치 색을 고정 LAB 값으로 강제하는 보정은 전체 ramp 점수를 소폭 높였지만 4% endpoint를 크게 낮췄고, 패치 제거 또는 두 패치 중심 미세 정렬도 held-out 성능을 낮췄습니다. 따라서 관련 실험은 audit 코드로만 보존하며 배포 특징 추출기는 기존 중성 픽셀 보정과 원형 ROI/quarter-turn 정렬을 유지합니다.
 
 사용자가 정렬한 `_cropped` 영상은 원 타임라인을 유지한 별도 cache로 A/B 평가할 수 있습니다. 단순 원본 대체와 원본+crop 증강은 동일 run 블록 점수는 높였지만 독립 영상 held-out 점수를 낮춰 배포하지 않았습니다. 상세 수치와 원 검출 기하 문제는 [`training/CROPPED_VIDEO_AUDIT.md`](training/CROPPED_VIDEO_AUDIT.md)에 기록했습니다.

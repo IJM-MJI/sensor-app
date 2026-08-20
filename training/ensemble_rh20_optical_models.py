@@ -23,7 +23,22 @@ def read_selected(path: Path, model: str):
         rows = [row for row in csv.DictReader(handle)
                 if row["task"] == "H2" and row["protocol"] == "video_holdout"
                 and row["model"] == model]
-    return {(row["video"], float(row["time"])): row for row in rows}
+    return rows
+
+
+def align_rows(baseline, optical):
+    """Align equal-rate exports despite sub-frame timestamp rounding changes."""
+    by_video_a, by_video_b = {}, {}
+    for row in baseline: by_video_a.setdefault(row["video"], []).append(row)
+    for row in optical: by_video_b.setdefault(row["video"], []).append(row)
+    aligned = []
+    for video in sorted(set(by_video_a) & set(by_video_b)):
+        left = sorted(by_video_a[video], key=lambda row: float(row["time"]))
+        right = sorted(by_video_b[video], key=lambda row: float(row["time"]))
+        if len(left) != len(right):
+            raise ValueError(f"Frame count differs for {video}: {len(left)} vs {len(right)}")
+        aligned.extend(zip(left, right))
+    return aligned
 
 
 def main():
@@ -34,26 +49,26 @@ def main():
     args = parser.parse_args(); args.output.mkdir(parents=True, exist_ok=True)
     baseline = read_selected(args.baseline, "ridge_flexible_rounded")
     optical = read_selected(args.optical, "ridge_rounded")
-    keys = sorted(set(baseline) & set(optical))
+    aligned = align_rows(baseline, optical)
     rows = []
-    groups = sorted({baseline[key]["group"] for key in keys})
+    groups = sorted({base["group"] for base, _ in aligned})
     for held_out in groups:
-        train_keys = [key for key in keys if baseline[key]["group"] != held_out]
+        train_pairs = [(base, candidate) for base, candidate in aligned
+                       if base["group"] != held_out]
         lookup = {}
-        for pair in {(int(float(baseline[key]["prediction"])),
-                      int(float(optical[key]["prediction"]))) for key in train_keys}:
-            truth = [int(float(baseline[key]["reference"])) for key in train_keys
-                     if (int(float(baseline[key]["prediction"])),
-                         int(float(optical[key]["prediction"]))) == pair]
+        for pair in {(int(float(base["prediction"])), int(float(candidate["prediction"])))
+                     for base, candidate in train_pairs}:
+            truth = [int(float(base["reference"])) for base, candidate in train_pairs
+                     if (int(float(base["prediction"])),
+                         int(float(candidate["prediction"]))) == pair]
             lookup[pair] = Counter(truth).most_common(1)[0][0]
-        for key in keys:
-            base = baseline[key]
+        for base, candidate in aligned:
             if base["group"] != held_out:
                 continue
-            pair = (int(float(base["prediction"])), int(float(optical[key]["prediction"])))
+            pair = (int(float(base["prediction"])), int(float(candidate["prediction"])))
             prediction = lookup.get(pair, pair[0])
             rows.append({
-                "video": key[0], "group": held_out, "time": key[1],
+                "video": base["video"], "group": held_out, "time": float(base["time"]),
                 "reference": int(float(base["reference"])),
                 "baseline_prediction": pair[0], "optical_prediction": pair[1],
                 "ensemble_prediction": prediction,
