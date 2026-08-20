@@ -73,14 +73,30 @@ model obtains exact .528, balanced .525, within-one-stage .929, and 0%/4%
 recalls .658/.832. It is scientifically cleaner but still weak at 2%/3%, so it
 has not replaced the app model.
 
+## H2 2/3% quality and RH20 boundary test
+
+The low-quality run-4/run-5 hypothesis and reviewed RH20 stage-2/stage-3
+alternatives were tested in `H2_23_QUALITY_RH20_AB.md`. Run 5's late partial
+frame was objectively the weakest (Laplacian variance 47 versus 143--531 in the
+verified runs). Display enhancement makes the colour easier to inspect but does
+not recover missing physical response and is not used for inference.
+
+A leakage-safe, verified-only 2-vs-3 expert reached .815 exact and .774 balanced
+accuracy. Adding RH20 2/3 weak samples reduced those values to .740/.690, so
+they were rejected. Confidence-gating the expert with the corrected global
+model kept exact accuracy at .528, raised balanced accuracy from .525 to .545,
+within-one-stage from .929 to .944, and lowered MAE from .565 to .542, but 3%
+recall fell from .316 to .243. It is therefore retained as an experiment and
+not deployed yet.
+
+The app now includes an optional display-only colour enhancement switch for a
+captured frame. The ML path still consumes the untouched canvas pixels.
+
 ## Next actions
 
-1. Human-mark the ten atlas endpoints as `VALID`, `PARTIAL RESPONSE`, or
-   `INVALID REFERENCE`.
-2. Tighten the flame component mask to remove patch/hardware pixels and rerun a
-   held-out mask A/B without changing labels.
-3. Apply human endpoint weights and the improved mask together; deploy only if
-   H2 video-held-out metrics improve.
-4. Repeat the endpoint/mask audit for RH-only, prioritizing 40--60% RH.
-5. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
-6. Perform independent photo/app validation and then freeze publication figures.
+1. Tune the verified 2-vs-3 expert with a 3%-recall constraint; deploy only if
+   it improves 2% without reducing 3% versus the corrected global model.
+2. Repeat the same registered endpoint/quality audit for RH-only 40--60%, where
+   unseen-run confusion is currently largest.
+3. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
+4. Perform independent photo/app validation and then freeze publication figures.
