@@ -442,6 +442,24 @@ function concentrationVector(model,f){
     d['baseline_flame_'+ch]=(BL['flame_'+ch]-BL['bg_'+ch]);
     d['baseline_flame_minus_drop_'+ch]=(BL['flame_'+ch]-BL['bg_'+ch])-(BL['drop_'+ch]-BL['bg_'+ch]);
   });
+  function baselineProjection(change,anchor,prefix){
+    var norm2=anchor.reduce(function(sum,value){return sum+value*value;},0);
+    norm2=Math.max(norm2,1e-12);
+    var projection=change.reduce(function(sum,value,index){return sum+value*anchor[index];},0)/norm2;
+    var orth2=change.reduce(function(sum,value,index){
+      var residual=value-projection*anchor[index];return sum+residual*residual;
+    },0);
+    d[prefix+'_projection']=projection;
+    d[prefix+'_orthogonal']=Math.sqrt(orth2/norm2);
+  }
+  baselineProjection(
+    [d.flame_L,d.flame_a,d.flame_b],
+    [d.baseline_flame_L,d.baseline_flame_a,d.baseline_flame_b],
+    'flame_baseline');
+  baselineProjection(
+    [d.flame_minus_drop_L,d.flame_minus_drop_a,d.flame_minus_drop_b],
+    [d.baseline_flame_minus_drop_L,d.baseline_flame_minus_drop_a,d.baseline_flame_minus_drop_b],
+    'flame_drop_baseline');
   [10,25,50,75,90].forEach(function(p){
     var name='flame_chroma_p'+p;d[name]=(f[name]||0)-(BL[name]||0);
   });

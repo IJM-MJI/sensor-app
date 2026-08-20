@@ -74,12 +74,14 @@ def main():
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--optical", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--baseline-model", default="ridge_flexible_rounded")
+    parser.add_argument("--optical-model", default="ridge_rounded")
     parser.add_argument("--strategy",
                         choices=("pair_lookup", "selective_rules", "selective_confidence"),
                         default="pair_lookup")
     args = parser.parse_args(); args.output.mkdir(parents=True, exist_ok=True)
-    baseline = read_selected(args.baseline, "ridge_flexible_rounded")
-    optical = read_selected(args.optical, "ridge_rounded")
+    baseline = read_selected(args.baseline, args.baseline_model)
+    optical = read_selected(args.optical, args.optical_model)
     aligned = align_rows(baseline, optical)
     rows = []
     chosen_rules = {}

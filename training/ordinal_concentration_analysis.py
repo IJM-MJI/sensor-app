@@ -55,6 +55,11 @@ FEATURE_NAMES = {
         "drop_registered_minus_flame_a", "drop_registered_minus_flame_b",
     ],
 }
+H2_BASELINE_PROJECTION_FEATURES = [
+    "flame_baseline_projection", "flame_baseline_orthogonal",
+    "flame_drop_baseline_projection", "flame_drop_baseline_orthogonal",
+]
+H2_FEATURE_PROFILE = "base"
 
 # User timelines describe ramp endpoints, not piecewise-constant plateaus.
 # (time, concentration reached at that time). Runs 4/5 then recover linearly
@@ -228,6 +233,41 @@ def apply_h2_endpoint_training_profile(rows, profile):
             factor = 1e-6
         row["sample_weight_factor"] = (
             float(row.get("sample_weight_factor", 1.0)) * factor)
+
+
+def apply_h2_frame_quality_profile(rows, profile):
+    """Downweight isolated optical jumps while retaining every run and stage."""
+    if profile == "none":
+        return
+    by_video = defaultdict(list)
+    for row in rows:
+        if (row.get("kind") == "h2_only" and "analysis_stage" in row
+                and row.get("analysis_phase") == "reaction"):
+            by_video[str(row["video"])].append(row)
+    for video_rows in by_video.values():
+        video_rows.sort(key=lambda row: float(row["time"]))
+        times = np.asarray([float(row["time"]) for row in video_rows])
+        # These calibrated flame/reference features are available to the
+        # single-frame application and do not depend on a nominal label.
+        values = np.asarray([augment(row, "flame")[:9] for row in video_rows])
+        local = np.empty_like(values)
+        for index, time in enumerate(times):
+            neighbours = np.where(np.abs(times - time) <= 2.0)[0]
+            if len(neighbours) < 5:
+                neighbours = np.argsort(np.abs(times - time))[:min(5, len(times))]
+            local[index] = np.median(values[neighbours], axis=0)
+        residual = np.abs(values - local)
+        scale = np.median(residual, axis=0) * 1.4826
+        scale = np.maximum(scale, np.percentile(residual, 75, axis=0) * .1 + 1e-6)
+        score = np.sqrt(np.mean((residual / scale) ** 2, axis=1))
+        threshold = max(float(np.percentile(score, 95)), 1.0)
+        for row, value in zip(video_rows, score):
+            # Smoothly suppress only the most isolated 5% instead of deleting
+            # an endpoint or a complete illumination domain.
+            factor = 1.0 if value <= threshold else max(.05, threshold / value)
+            row["h2_frame_outlier_score"] = float(value)
+            row["sample_weight_factor"] = (
+                float(row.get("sample_weight_factor", 1.0)) * factor)
 
 
 def assign_rh_ramp_targets(rows):
@@ -442,6 +482,20 @@ def augment(row, region):
         chroma_suffixes = [f"chroma_p{percentile}" for percentile in (10, 25, 50, 75, 90)]
         if all(row.get(f"flame_{suffix}") not in (None, "") for suffix in chroma_suffixes):
             output.extend(float(row[f"flame_{suffix}"]) for suffix in chroma_suffixes)
+        if H2_FEATURE_PROFILE == "baseline_projection":
+            delta = np.asarray([L, a, b], dtype=float)
+            baseline = np.asarray(base, dtype=float)
+            reference_delta = delta - np.asarray([ref_L, ref_a, ref_b], dtype=float)
+            reference_baseline = baseline - np.asarray(base_ref, dtype=float)
+
+            def projection_features(change, anchor):
+                norm = max(float(np.linalg.norm(anchor)), 1e-6)
+                projection = float(np.dot(change, anchor) / (norm * norm))
+                orthogonal = float(np.linalg.norm(change - projection * anchor) / norm)
+                return projection, orthogonal
+
+            output.extend(projection_features(delta, baseline))
+            output.extend(projection_features(reference_delta, reference_baseline))
     return output
 
 
@@ -530,7 +584,9 @@ def fit_and_export(rows, task, config, selected):
     common = {
         "task": task,
         "selected": selected,
-        "features": FEATURE_NAMES[task],
+        "features": (FEATURE_NAMES[task] + H2_BASELINE_PROJECTION_FEATURES
+                     if task == "H2" and H2_FEATURE_PROFILE == "baseline_projection"
+                     else FEATURE_NAMES[task]),
         "levels": config["levels"],
         "display_levels": config["display_levels"],
         "policy": "nearest stage; adjacent range near a stage boundary",
@@ -732,6 +788,7 @@ def plot_h2_phases(output, phase_reports):
 
 
 def main():
+    global H2_FEATURE_PROFILE
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache", type=Path,
                         default=Path("training/cache") / CACHE_VERSION / "features.csv")
@@ -762,7 +819,14 @@ def main():
                         choices=("none", "suspect_endpoints", "exclude_run5"),
                         default="none",
                         help="near-zero-weight suspect H2 endpoint labels in training only")
+    parser.add_argument("--h2-feature-profile", choices=("base", "baseline_projection"),
+                        default="base",
+                        help="add app-computable run baseline projection features")
+    parser.add_argument("--h2-frame-quality-profile", choices=("none", "local_path"),
+                        default="none",
+                        help="downweight isolated within-run optical path outliers")
     args = parser.parse_args()
+    H2_FEATURE_PROFILE = args.h2_feature_profile
     reviewed_stages = tuple(int(value.strip()) for value in args.rh20_reviewed_stages.split(",")
                             if value.strip())
     output = args.output
@@ -786,6 +850,7 @@ def main():
     add_stability(rows)
     assign_h2_ramp_targets(rows)
     apply_h2_endpoint_training_profile(rows, args.h2_endpoint_training_profile)
+    apply_h2_frame_quality_profile(rows, args.h2_frame_quality_profile)
     assign_rh_ramp_targets(rows)
     if args.include_rh20_h2:
         assign_rh20_h2_weak_targets(
