@@ -223,3 +223,18 @@ strictly ordered (50% was slightly lighter than 40%), so hue shift must be the
 primary feature and darkness only a low-weight confirmation.  These local
 thresholds must not be deployed globally until a second place-1 long-format
 run or late-interval pseudo-replicates validate them.
+
+The requested late-interval audit then sampled five frames per block. One
+second blocks reached .880 exact/.875 balanced with recalls
+.90/1.00/.80/.80. Half-second blocks appeared better at .950/.938 with
+recalls 1.00/1.00/.75/1.00, but this is not a valid monotonic colour model:
+the RH40 and RH50 median hues reversed (100.32 vs 100.74 degrees) and their
+ranges overlapped. Quarter-second blocks fell to .700/.625 and failed RH50
+entirely. Only the single exact endpoint samples retained the clean
+olive-yellow-to-orange order; neighbouring frames do not reproduce it
+reliably.
+
+Therefore the local thresholds remain undeployed. The evidence supports an
+experimental 40--50% band from a still photo, not robust exact 40/50 output.
+The generated frame sheet isolates RH40 at 44.75/45.00 s and RH50 from
+88.25--90.00 s for human adjudication before changing endpoint supervision.
