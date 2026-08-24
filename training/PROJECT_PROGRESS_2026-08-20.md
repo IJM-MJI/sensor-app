@@ -238,3 +238,20 @@ Therefore the local thresholds remain undeployed. The evidence supports an
 experimental 40--50% band from a still photo, not robust exact 40/50 output.
 The generated frame sheet isolates RH40 at 44.75/45.00 s and RH50 from
 88.25--90.00 s for human adjudication before changing endpoint supervision.
+
+Endpoint-after sampling did not resolve the physical-order problem. Half-second
+blocks over the first 1.5 s scored .960 exact/.950 balanced, and quarter-second
+blocks over the first second scored 1.000/1.000, but both learned a reversed
+RH40/RH50 relation: median hue was 100.14 degrees at 40% and 100.78 degrees at
+50%, with overlapping ranges. Starting at +.75 s still gave 99.96/100.68
+degrees and .880 exact. A single frame near +.95 s briefly restored the expected
+ordering, but the surrounding frames did not. Lightness was also reversed
+(50% lighter than 40%). These high within-run scores therefore reflect a
+repeatable run-specific signature, not the requested olive-to-orange physical
+trajectory, and remain undeployed.
+
+The enlarged raw/patch-balanced review confirms that the ROI follows the main
+droplet. The next scientifically defensible existing-data output is a 40--50%
+band. Exact 40/50 requires another independent place-1 rising run or a supplied
+human decision that a specific endpoint frame, rather than its surrounding
+frames, is the valid optical reference.

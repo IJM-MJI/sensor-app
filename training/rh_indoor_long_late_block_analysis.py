@@ -36,14 +36,21 @@ def classify(hue, class_hues):
     return min(ordered, key=lambda item: abs(hue - item[1]))[0]
 
 
-def extract_blocks(items, video_root, span=3.0, duration=1.0, step=.5):
+def extract_blocks(items, video_root, span=3.0, duration=1.0, step=.5,
+                   side="before", offset=0.0):
     output = []
     for item in items:
         path = source_path(video_root, item["video"])
         cap = cv2.VideoCapture(str(path))
         if not cap.isOpened():
             raise RuntimeError(f"Cannot open {path}")
-        starts = np.arange(item["time"] - span, item["time"] - duration + 1e-6, step)
+        if side == "before":
+            starts = np.arange(item["time"] - span,
+                               item["time"] - duration + 1e-6, step)
+        else:
+            starts = np.arange(item["time"] + offset,
+                               item["time"] + offset + span - duration + 1e-6,
+                               step)
         for start in starts:
             hues, lightness, chroma, counts = [], [], [], []
             # Stay just inside the block so a decoder cannot cross the nominal
@@ -171,11 +178,15 @@ def main():
     parser.add_argument("--span", type=float, default=3.0)
     parser.add_argument("--duration", type=float, default=1.0)
     parser.add_argument("--step", type=float, default=.5)
+    parser.add_argument("--side", choices=("before", "after"), default="before")
+    parser.add_argument("--offset", type=float, default=0.0,
+                        help="Seconds after endpoint at which an after-window starts")
     args = parser.parse_args(); args.output.mkdir(parents=True, exist_ok=True)
     items = [item for item in endpoint_rows(read_csv(args.cache))
              if item["group"] == "rh-indoor-long" and item["stage"] <= 60
              and item["video"] == "1_90_H2O_only_extract_3min.mp4"]
-    rows = extract_blocks(items, args.video_root, args.span, args.duration, args.step)
+    rows = extract_blocks(items, args.video_root, args.span, args.duration,
+                          args.step, args.side, args.offset)
     predictions, metrics = leave_one_block_out(rows)
     summary = summaries(rows)
     decision = {
@@ -187,7 +198,8 @@ def main():
         "app_deploy": False,
         "reason": "Pseudo-blocks are correlated within one run; independent-run evidence is still required.",
     }
-    payload = {"scope": (f"place-1 indoor-long endpoint-final {args.span:g} s; "
+    payload = {"scope": (f"place-1 indoor-long endpoint-{args.side} {args.span:g} s "
+                         f"at offset {args.offset:g} s; "
                          f"{args.duration:g} s blocks, {args.step:g} s step"),
                "warning": "Stability audit only, not independent-run validation",
                "metrics": metrics, "stage_summary": summary, "decision": decision}
