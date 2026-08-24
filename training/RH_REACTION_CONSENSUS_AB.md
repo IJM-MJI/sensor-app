@@ -216,3 +216,42 @@ Artifacts:
 - `output/rh_human_color_path_v1/metrics.json`
 - `output/rh_human_color_path_v1/predictions.csv`
 - `output/rh_human_color_path_v1/rh_human_color_path_validation.png`
+
+## Registered-droplet paired-pixel hue A/B
+
+The next extraction used actual paired LAB pixels inside the registered
+droplet mask rather than reconstructing hue from separate channel quantiles.
+It measured a 12-bin circular hue histogram, yellow/orange/scarlet/purple/green
+fractions, chroma, and lightness. Each held-out run supplied only its own low-RH
+calibration; all concentration fitting used the other runs. The comparison used
+the same 31 exact Reaction endpoints and retained the verified place-1 high-RH
+policy.
+
+| Endpoint model | Exact | Balanced | Within one stage | MAE |
+|---|---:|---:|---:|---:|
+| Legacy registered-droplet delta LAB | .355 | .325 | .677 | 12.10%RH |
+| Named paired-pixel colour fractions | .387 | .321 | .742 | 13.55%RH |
+| Full histogram absolute + delta | .355 | .314 | .581 | 15.65%RH |
+
+The named colour model recovered some 40%, 50%, and 80% endpoints, but 60%
+recall remained zero, 70% fell from .40 to zero, and 90% fell from 1.00 to .50.
+It improved exact accuracy but reduced balanced accuracy and increased MAE, so
+it fails the predeclared preservation and .85-per-stage criteria. It is not
+deployed and does not trigger the planned H2 yellow-to-light-green extension.
+
+The pixel audit also reveals an extraction mismatch that must be reviewed
+before changing colour boundaries: the indoor-long run is classified as almost
+100% yellow pixels at every 20--80% endpoint, and indoor-fast remains more than
+83% yellow at 40--80%, despite the user's visible orange/red/purple response.
+The next evidence is therefore a raw-frame atlas that overlays each selected
+pixel with its assigned colour family. If the visibly changed pixels lie
+outside the selected mask, fix registration/masking; if they are inside but
+assigned yellow, revise colour conversion/bin definitions. Threshold tuning
+without that visual check would only fit run identity.
+
+Artifacts:
+
+- `output/rh_paired_pixel_hue_v1/metrics.json`
+- `output/rh_paired_pixel_hue_v1/predictions.csv`
+- `output/rh_paired_pixel_hue_v1/pixel_audit.csv`
+- `output/rh_paired_pixel_hue_v1/rh_paired_pixel_hue_validation.png`

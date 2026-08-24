@@ -147,6 +147,16 @@ unchanged. The next existing-video feature experiment is paired-pixel hue-bin
 extraction from the registered droplet mask; independent LAB channel quantiles
 cannot represent the literal colour family reliably.
 
+Paired-pixel hue extraction was subsequently run on the registered droplet
+mask. On the strict 31-endpoint held-out set, named colour fractions raised
+exact accuracy from .355 to .387 and within-one-stage accuracy from .677 to
+.742, but balanced accuracy fell from .325 to .321 and MAE worsened from 12.10
+to 13.55%RH. It recovered some 40/50/80 endpoints while losing 70/90 and leaving
+60 at zero. The candidate is rejected, the app is unchanged, and the H2
+yellow-to-light-green extension is intentionally not started. A colour-family
+mask atlas is required next because both place-1 runs remain overwhelmingly
+yellow in the extracted pixels even where the user sees later colour families.
+
 ## Next actions
 
 1. Keep the place-1 nominal-90 reference as a 70--80% interval and place-2 90%
@@ -158,11 +168,13 @@ cannot represent the literal colour family reliably.
    least .85 recall in every deployed band/stage, not frame-random accuracy.
 4. Until that evidence exists, keep exact RH quantitation experimental and show
    an uncertainty/range result rather than silently applying this hierarchy.
-5. Before new recording, add paired-pixel yellow/orange/scarlet/purple fractions
-   to the registered droplet extractor and run one final complete-run-held-out
-   colour-family A/B on the existing videos.
-6. Fit simultaneous H2 and H2O-only-referenced RH interference correction only
+5. Render a raw-frame colour-family atlas for every RH endpoint. Verify whether
+   orange/scarlet/purple pixels are excluded by the mask or assigned to the
+   wrong hue bin; correct only the demonstrated failure and repeat the A/B.
+6. Apply the same paired-pixel idea to H2 yellow-to-light-green only if the RH
+   correction improves exact and balanced accuracy without lowering any stage.
+7. Fit simultaneous H2 and H2O-only-referenced RH interference correction only
    after the RH-only reference model passes its held-out criterion.
-7. Revisit the H2 2/3 gate only after an independent high-quality run supplies
+8. Revisit the H2 2/3 gate only after an independent high-quality run supplies
    enough 2%/3% frames to test the .95 rule without using run 4 for selection.
-8. Perform independent photo/app validation and then freeze publication figures.
+9. Perform independent photo/app validation and then freeze publication figures.
