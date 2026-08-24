@@ -85,3 +85,38 @@ recall regression is too large and the exact accuracy is unchanged.
 5. The app's `Color view` switch changes only the displayed captured image;
    inference continues to read the original canvas pixels.
 
+## 3%-recall-preserving asymmetric gate
+
+`combine_h2_23_expert_constrained.py` tested separate 2-to-3 and 3-to-2
+probability thresholds. A candidate was allowed only when its meta-training
+results improved 2% recall while preserving 3% recall, exact accuracy, and MAE
+relative to the corrected global model.
+
+The honest nested leave-one-video-out result did **not** pass the aggregate
+constraints. Its 2%/3% recalls and exact accuracy remained unchanged at
+.392/.316/.528. Although within-one-stage accuracy improved to .944 and MAE to
+.542, no 2% gain remained. One held-out fold (`h2-indoor-4`) had no feasible
+gate when that run was excluded from threshold selection.
+
+A diagnostic fixed gate (`3 -> 2` only above .95 expert probability; the
+`2 -> 3` threshold was inactive) appears to pass when all cross-fitted labels
+are used to select the threshold:
+
+| Metric | Corrected global | Diagnostic fixed gate |
+|---|---:|---:|
+| exact accuracy | .528 | .533 |
+| 2% recall | .392 | .432 |
+| 3% recall | .316 | .316 |
+| MAE | .564 | .537 |
+
+This apparent 2% improvement consists of only three corrected frames, all from
+`h2-indoor-4`. The other thirteen changed frames are test-3 0%/1% errors moved
+from prediction 3 to prediction 2; they reduce MAE but do not become exact.
+Consequently the fixed-gate score is a useful diagnostic but not independent
+deployment evidence. The current browser concentration model remains unchanged.
+
+Outputs:
+
+- `output/h2_verified_23_expert_constrained_v14/metrics.json`
+- `output/h2_verified_23_expert_constrained_v14/threshold_grid.csv`
+- `output/h2_verified_23_expert_constrained_v14/constraint_comparison.png`

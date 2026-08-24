@@ -92,11 +92,18 @@ not deployed yet.
 The app now includes an optional display-only colour enhancement switch for a
 captured frame. The ML path still consumes the untouched canvas pixels.
 
+The subsequent asymmetric-threshold test preserved 3% recall in its diagnostic
+fixed-gate result (.316) and raised 2% recall from .392 to .432, but the three
+new correct 2% frames all came from run 4. When run 4 was genuinely held out,
+the nested selector found no feasible gate. The honest aggregate result did not
+improve 2% recall, so the gate was not deployed. Details are appended to
+`H2_23_QUALITY_RH20_AB.md`.
+
 ## Next actions
 
-1. Tune the verified 2-vs-3 expert with a 3%-recall constraint; deploy only if
-   it improves 2% without reducing 3% versus the corrected global model.
-2. Repeat the same registered endpoint/quality audit for RH-only 40--60%, where
+1. Repeat the same registered endpoint/quality audit for RH-only 40--60%, where
    unseen-run confusion is currently largest.
-3. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
+2. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
+3. Revisit the H2 2/3 gate only after an independent high-quality run supplies
+   enough 2%/3% frames to test the .95 rule without using run 4 for selection.
 4. Perform independent photo/app validation and then freeze publication figures.
