@@ -255,3 +255,21 @@ droplet. The next scientifically defensible existing-data output is a 40--50%
 band. Exact 40/50 requires another independent place-1 rising run or a supplied
 human decision that a specific endpoint frame, rather than its surrounding
 frames, is the valid optical reference.
+
+### Cross-run RH40/50 spatial audit
+
+The 40/50 question was then tested across all four rising RH-only runs, rather
+than inferred from indoor-long alone. Three runs showed the expected endpoint
+hue decrease from 40 to 50% (indoor-long -1.93, response-3 -.82, response-6
+-.62 degrees); indoor-fast reversed by +1.69 degrees. A complete-run-held-out
+binary classifier using whole-droplet relative colour scored .500 with
+40/50 recalls .75/.25. Splitting the main droplet into core/rim/top/bottom/
+left/right improved exact/balanced accuracy to .625, but 50% recall remained
+.25. Excluding the known poor-ROI indoor-fast run reduced both candidates to
+.500 with 40/50 recalls .67/.33, so FAST alone does not explain the failure.
+
+The cross-run zoom sheet shows that long, response-3, and response-6 do contain
+a visible 40-to-50 darkening/orange tendency, but its magnitude and whole-frame
+exposure shift differ substantially by run. Current per-run endpoint evidence
+is insufficient to learn a transferable exact 40/50 boundary. The spatial
+candidate is not deployed; 40--50 remains the honest cross-run output band.
