@@ -109,12 +109,18 @@ leave-one-run-out consensus prototype. Consensus improves exact accuracy from
 recall falls from .25 to zero and 80% falls from .50 to .25. It is not deployed.
 No endpoint label was changed. See `RH_REACTION_CONSENSUS_AB.md`.
 
+The follow-up place audit compared the user-requested response-3 5 s and
+response-6 13 s frames with place-1 60% endpoints. Both requested frames are
+substantially closer than their own nominal 60% endpoints across all tested
+registered-droplet feature sets. Because 5/13 s are the supplied place-2 40%
+endpoints, this is evidence of a place-dependent optical coordinate shift, not
+a reason to relabel them 60%. The next RH model must be location/domain-aware.
+
 ## Next actions
 
-1. Human-audit the four rising-Reaction 60% endpoints in the aligned RH sheet;
-   distinguish valid full response from a transition endpoint.
-2. If valid, test a domain-normalized middle-stage expert; if transitional,
-   downgrade only the reviewed response endpoint to interval supervision.
+1. Test a calibration-selected place-1/place-2 RH mixture while holding out a
+   complete independent run within each place.
+2. Keep 5 s/13 s as their supplied 40% endpoints; do not use them as 60% labels.
 3. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
 4. Revisit the H2 2/3 gate only after an independent high-quality run supplies
    enough 2%/3% frames to test the .95 rule without using run 4 for selection.

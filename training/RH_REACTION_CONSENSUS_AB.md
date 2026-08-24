@@ -77,3 +77,35 @@ Artifacts:
 - `output/rh_consensus_endpoint_v1/rh_consensus_endpoint_validation.png`
 - `output/middle_endpoint_review/rh_middle_endpoint_review.jpg`
 
+## Place-1 versus place-2 60% candidate audit
+
+The user identified indoor-fast/indoor-long as place 1 and response-3/response-6
+as place 2, then requested an optical comparison using response-3 at about 5 s
+and response-6 at about 13 s. These requested frames were compared with the two
+place-1 nominal 60% endpoints after each run's 20--30% Initial centring. No
+timeline label was changed.
+
+| Place-2 run | Requested frame | Requested distance | Nominal 60% distance |
+|---|---:|---:|---:|
+| response-3 | 5.07 s | **.589** | 1.116 at 10.93 s |
+| response-6 | 13.07 s | **.812** | 1.855 at 16.00 s |
+
+Values above use registered-droplet LAB; LAB plus the flame reference and the
+full compact feature set give the same requested-is-closer conclusion. The
+requested times are approximately the supplied **40% endpoints**, not alternate
+60% timestamps. Therefore this result must not relabel them as 60%. It shows
+that a place-2 40% state can occupy the place-1 60% optical region even after
+Initial subtraction. The main RH bottleneck is location/domain-dependent colour
+response, not a single shared timing correction.
+
+The next defensible A/B is a location-aware mixture: infer the acquisition
+domain from the calibration frame, then use separate place-1 and place-2 RH
+prototypes. It must be evaluated by holding out a complete run within each
+place. If it fails, the present videos do not contain enough independent runs
+per place for absolute RH quantitation.
+
+Additional artifacts:
+
+- `output/rh_location_60_candidates_v1/metrics.json`
+- `output/rh_location_60_candidates_v1/comparison.csv`
+- `output/rh_location_60_candidates_v1/rh_location_60_candidate_atlas.jpg`
