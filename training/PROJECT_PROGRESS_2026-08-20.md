@@ -309,3 +309,14 @@ pass the predeclared .85 recall in every band. Feature selection also cannot be
 independently confirmed with only these two runs, so it remains experimental
 and is not yet deployed to the app. A third independent place-2 rising run is
 the clean validation needed before freezing this profile.
+
+The two place-2 errors were then audited over +/-1 s at 4 Hz. Response3 stayed
+in the 20--30 prediction from nominal RH35 through RH44.3, including its 40%
+endpoint. Response6 stayed predominantly in 80--90 from nominal RH65.3 through
+RH74.7; only one early frame briefly predicted 60--70. Confidence was low
+(roughly .27--.35), but moving either endpoint by several frames did not restore
+the correct range. The enlarged droplets and substrate-corrected LAB traces are
+continuous across the supplied endpoints. Therefore neither error is caused by
+a single bad boundary frame, and the timelines are unchanged. The remaining
+failure is a run-to-run response-scale mismatch, not an endpoint annotation
+mistake.
