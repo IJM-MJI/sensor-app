@@ -283,3 +283,13 @@ regions had ample pixels, so this is not a missing-mask failure. Predictions
 still separated mainly by run/location, showing that a simple global exposure
 offset is not the dominant source of non-transferability. No corrected model
 is deployed.
+
+### Four-range RH held-out result
+
+Exact endpoints were merged into 20--30/40--50/60--70/80--90% ranges and all
+whole, spatial, and illumination-control candidates were evaluated with a
+complete run held out. The best dual-control model reached .600 exact, .604
+balanced, and .967 within one adjacent range. Per-range recalls were
+1.00/.375/.375/.667. The high adjacent-range score confirms that most errors
+are one-band scale shifts between runs, but neither the middle ranges nor the
+.85 deployment rule passed. The four-range model is therefore not deployed.

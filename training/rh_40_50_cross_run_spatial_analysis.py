@@ -118,7 +118,7 @@ def vector(summary, baseline):
     return values, 1.0
 
 
-def build(items, summaries):
+def build(items, summaries, included_levels=LEVELS):
     groups = np.asarray([item["group"] for item in items])
     truth = np.asarray([item["stage"] for item in items])
     baseline = {}
@@ -138,7 +138,7 @@ def build(items, summaries):
                                         np.median(np.asarray(valid), axis=0))
     matrices = defaultdict(list); audit = []
     for item, summary in zip(items, summaries):
-        if item["stage"] not in LEVELS:
+        if item["stage"] not in included_levels:
             continue
         whole, _ = vector(summary["whole"], baseline[item["group"]]["whole"])
         spatial, present = [], []
