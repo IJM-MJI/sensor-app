@@ -181,3 +181,28 @@ the valid 70% evidence.
 8. Revisit the H2 2/3 gate only after an independent high-quality run supplies
    enough 2%/3% frames to test the .95 rule without using run 4 for selection.
 9. Perform independent photo/app validation and then freeze publication figures.
+
+## Inner-ROI plus within-yellow A/B
+
+The two follow-up corrections were tested together on the same 30 valid RH-only
+rising endpoints.  The registered droplet template was contracted to an inner
+core, the large droplet and satellite were measured separately, and hue,
+chroma, and lightness were expressed relative to each run's 20--30% baseline.
+The large-droplet-only candidate improved exact accuracy from .433 to .467 and
+balanced accuracy from .357 to .429.  It restored 90% recall to 1.00 and raised
+80% recall to .50, but 40% and 60% remained zero and 70% fell from .25 to zero.
+It therefore fails the every-stage and .85 criteria and is not deployed.
+
+Adding the small satellite reduced exact/balanced accuracy to .300/.250.  Its
+weak colour response and frequent low pixel count dilute the useful large-drop
+signal, so it must remain an audit/consistency region rather than a primary RH
+concentration feature.
+
+The endpoint audit explains the remaining 40/50 ambiguity in response-6: main
+droplet hue was 78.25/77.62 degrees and median lightness was identical at the
+two endpoints.  Response-3 likewise differed by only .82 degrees, while its
+chroma change had the opposite direction from response-6.  A single-frame,
+cross-run 40-vs-50 decision is therefore not identifiable reliably from these
+endpoints.  The next existing-video experiment should aggregate several late
+interval frames and report a 40--50 band unless an independently held-out run
+shows a reproducible within-yellow separation.

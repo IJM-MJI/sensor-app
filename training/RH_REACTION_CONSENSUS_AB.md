@@ -282,3 +282,27 @@ Artifacts:
 - `output/rh_colour_family_atlas_v1/rh-indoor-long_colour_family_atlas.jpg`
 - `output/rh_colour_family_atlas_v1/rh-response-3_colour_family_atlas.jpg`
 - `output/rh_colour_family_atlas_v1/rh-response-6_colour_family_atlas.jpg`
+
+## Conservative inner ROI and relative-colour result
+
+The combined correction used a contracted registered core and run-baseline
+relative hue/chroma/lightness.  Evaluation still held out a complete run.
+
+| Endpoint model | Exact | Balanced | Within one stage | MAE |
+|---|---:|---:|---:|---:|
+| Named paired-pixel baseline | .433 | .357 | .767 | 11.83%RH |
+| Inner large droplet, relative colour | .467 | .429 | .700 | 12.83%RH |
+| Large plus satellite, relative colour | .300 | .250 | .533 | 20.17%RH |
+
+The large-drop model improves exact and balanced scores but does not preserve
+every stage: recalls for 25/40/50/60/70/80/90% were
+1.00/.00/.50/.00/.00/.50/1.00.  It is not deployed.  The satellite is excluded
+from primary quantitation after its clear held-out regression.
+
+Artifacts:
+
+- `output/rh_tight_relative_v1/metrics.json`
+- `output/rh_tight_relative_v1/predictions.csv`
+- `output/rh_tight_relative_v1/roi_audit.csv`
+- `output/rh_tight_relative_v1/rh_tight_relative_validation.png`
+- `output/rh_tight_relative_v1/user_photo_roi_review.png`
