@@ -125,12 +125,29 @@ forced-middle prototype scored .500 exact with recalls .25/.50/.75 and MAE
 is rejected. The next candidate is a coarse-band gate plus the global middle
 expert.
 
+The place ceiling has now been corrected: place 1's nominal 90% endpoint is
+treated as 70--80% interval evidence, while place 2 retains exact 90% labels.
+The resulting coarse-band gate reached .770 accuracy, but only .333 recall for
+the crucial 40--60% band. Routing its middle predictions to the dedicated
+expert left exact accuracy unchanged at .689, improved balanced accuracy from
+.456 to .487, reduced within-one-stage accuracy from .869 to .852, and did not
+recover 50%. The hierarchy is scientifically cleaner but is not deployable.
+See `RH_REACTION_CONSENSUS_AB.md` and
+`output/rh_coarse_middle_hierarchy_v1/`.
+
 ## Next actions
 
-1. Build a complete-run-held-out coarse RH gate (`20--30`, `40--60`, `70--90`)
-   and invoke the global 40/50/60 expert only inside the middle band.
-2. Keep 5 s/13 s as their supplied 40% endpoints; do not use them as 60% labels.
-3. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
-4. Revisit the H2 2/3 gate only after an independent high-quality run supplies
+1. Keep the place-1 nominal-90 reference as a 70--80% interval and place-2 90%
+   as exact; do not merge these into one exact 90% class.
+2. Record at least one new independent rising-Reaction run per place, preferably
+   two, with stable holds and chamber-sensor readings at 40/50/60%. Include
+   confirmed 70/80% in place 1 and 70/80/90% in place 2.
+3. Repeat complete-run-held-out coarse and exact-stage validation. Require at
+   least .85 recall in every deployed band/stage, not frame-random accuracy.
+4. Until that evidence exists, keep exact RH quantitation experimental and show
+   an uncertainty/range result rather than silently applying this hierarchy.
+5. Fit simultaneous H2 and H2O-only-referenced RH interference correction only
+   after the RH-only reference model passes its held-out criterion.
+6. Revisit the H2 2/3 gate only after an independent high-quality run supplies
    enough 2%/3% frames to test the .95 rule without using run 4 for selection.
-5. Perform independent photo/app validation and then freeze publication figures.
+7. Perform independent photo/app validation and then freeze publication figures.

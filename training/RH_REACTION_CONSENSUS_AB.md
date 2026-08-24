@@ -144,3 +144,39 @@ Artifacts:
 - `output/rh_location_mixture_v1/metrics.json`
 - `output/rh_location_mixture_v1/predictions.csv`
 - `output/rh_location_mixture_v1/rh_location_mixture_validation.png`
+
+## Verified place ceiling and coarse-to-middle hierarchy
+
+The user confirmed that place 1 normally reaches only about 70--80% RH even
+when its supplied timeline names a 90% setpoint, whereas place 2 reaches 90%.
+Accordingly, the place-1 `rh-indoor-fast` nominal-90 endpoint is now interval
+supervision (`70--80%`) and is excluded from exact-stage scoring. Place-2 90%
+endpoints remain exact. This is a reference correction, not a model-generated
+relabel.
+
+A complete-run-held-out hierarchy then classified every endpoint into
+`20--30`, `40--60`, or `70--90`; the dedicated global middle expert was invoked
+only when the gate predicted `40--60`.
+
+| Model | Exact | Balanced | Within one stage | MAE |
+|---|---:|---:|---:|---:|
+| Fine baseline | .689 | .456 | .869 | 5.82%RH |
+| Gate + middle expert | .689 | .487 | .852 | 5.82%RH |
+
+The coarse gate obtained .770 exact band accuracy, but its recalls were
+`.969/.333/.706` for low/middle/high. The hierarchy raised 60% recall from .25
+to .50, but left 50% recall at zero, lowered low-stage recall, and reduced the
+within-one-stage score. It therefore fails the deployment criteria and does
+not replace the app model.
+
+The failure is systematic across acquisition domains: most place-1 40--60%
+endpoints are routed to the low band, while later place-2 middle endpoints are
+routed to the high band. Automatic place selection and even the true-place
+oracle already failed to solve this in the preceding test. The existing videos
+therefore do not support a defensible automatic location-specific correction.
+
+Artifacts:
+
+- `output/rh_coarse_middle_hierarchy_v1/metrics.json`
+- `output/rh_coarse_middle_hierarchy_v1/predictions.csv`
+- `output/rh_coarse_middle_hierarchy_v1/rh_coarse_middle_hierarchy.png`
