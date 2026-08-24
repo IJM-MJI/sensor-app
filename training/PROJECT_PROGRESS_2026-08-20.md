@@ -342,3 +342,29 @@ response6 high-range adjustment is a useful run-local calibration candidate,
 but the response3 shift is rejected. These values were chosen using the same
 two trajectories and are not independent validation, so neither change is
 deployed to the app.
+
+### Response3 endpoint-model adjustment
+
+The response3 40% time was scanned across the single-frame optical 40--50%
+window (6.40--7.47 s), while retaining the response6 70% correction at 16.67 s.
+Times from 6.67 s onward made the held-out response3 endpoints perfect, but
+reduced the opposite response6 fold to .75. No response3 time shift improved
+both transfer directions, so its supplied 5 s endpoint was restored.
+
+Nine fixed classifier families were then tested without changing response3's
+timeline. Background-substrate-controlled 1-nearest-neighbour was the only
+candidate to classify all 16 endpoints correctly when each complete run was
+held out in turn: exact/balanced accuracy and every range recall were 1.00.
+Most alternative models reached .9375 exact but retained a .75 minimum recall,
+showing that response3 is separable as a local colour pattern even though a
+single linear boundary misses it.
+
+The 1-NN endpoint result is sensitive to sampling position. Testing the last
+0.27 s before each endpoint scored .906 exact/.906 balanced with combined
+recalls 1.00/.875/.875/.875, but the response3-only fold was .8125. Extending
+to the last .53 s reduced the minimum recall to .727. Adding these late-ramp
+frames to training made transfer worse rather than better, because even this
+short interval contains appreciable ramp progression. The defensible current
+candidate is therefore an endpoint/full-response range model, not a general
+ramp-frame model. It remains undeployed until it is tested on an independent
+place-2 run or in a clearly marked experimental app profile.

@@ -101,16 +101,20 @@ def analyse_run(cache, endpoints, video_root, group):
     held_by_time = {round(row["time"], 6): index for index, row in enumerate(audit)
                     if row["group"] == group and round(row["time"], 6) in candidate_times}
     held_indices = [held_by_time[key] for key in sorted(held_by_time)]
-    probabilities = model.predict_proba(matrices["background_control"][held_indices])
-    probabilities = smooth(probabilities)
+    raw_probabilities = model.predict_proba(matrices["background_control"][held_indices])
+    raw_predictions = model.classes_[np.argmax(raw_probabilities, axis=1)]
+    probabilities = smooth(raw_probabilities)
     predictions = model.classes_[np.argmax(probabilities, axis=1)]
     rows = []
-    for index, prediction, probability in zip(held_indices, predictions, probabilities):
+    for index, prediction, probability, raw_prediction, raw_probability in zip(
+            held_indices, predictions, probabilities, raw_predictions, raw_probabilities):
         row = audit[index]; seconds = float(row["time"])
         rows.append({"group": group, "video": RUNS[group]["video"], "time": seconds,
                      "nominal_rh": nominal(RUNS[group]["segments"], seconds),
                      "predicted_band": float(prediction),
                      "confidence": float(np.max(probability)),
+                     "raw_predicted_band": float(raw_prediction),
+                     "raw_confidence": float(np.max(raw_probability)),
                      "drop_minus_bg_L": row["drop_minus_bg_L"],
                      "drop_minus_bg_a": row["drop_minus_bg_a"],
                      "drop_minus_bg_b": row["drop_minus_bg_b"]})
@@ -156,12 +160,22 @@ def timeline_sensitivity(cache, video_root):
     variants = {
         "original": {},
         "response3_40_later": {("rh-response-3", 40.0): 6.13},
+        "response3_40_stable_single_frame": {("rh-response-3", 40.0): 6.67},
         "response6_70_earlier": {("rh-response-6", 70.0): 16.67},
         "both_shifts": {
             ("rh-response-3", 40.0): 6.13,
             ("rh-response-6", 70.0): 16.67,
         },
+        "stable_response3_plus_response6": {
+            ("rh-response-3", 40.0): 6.67,
+            ("rh-response-6", 70.0): 16.67,
+        },
     }
+    for seconds in (6.40, 6.67, 6.93, 7.20, 7.47):
+        variants[f"response3_scan_{seconds:.2f}_plus_response6"] = {
+            ("rh-response-3", 40.0): seconds,
+            ("rh-response-6", 70.0): 16.67,
+        }
     output = {}
     for name, shifts in variants.items():
         items = shifted_endpoint_items(cache, shifts)
