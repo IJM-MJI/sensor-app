@@ -109,3 +109,38 @@ Additional artifacts:
 - `output/rh_location_60_candidates_v1/metrics.json`
 - `output/rh_location_60_candidates_v1/comparison.csv`
 - `output/rh_location_60_candidates_v1/rh_location_60_candidate_atlas.jpg`
+
+## Calibration-selected place mixture result
+
+The proposed place-1/place-2 split was evaluated by hiding a complete run. The
+held-out run's 20--30% calibration features voted for a place; the RH expert
+then used only the remaining run(s) assigned to that place. A true-place oracle
+was also evaluated to separate domain-selection error from concentration error.
+
+Calibration place selection was correct for both place-1 runs but classified
+both place-2 response runs as place 1: **2/4 = 50% domain accuracy**. The
+predeclared registered-droplet LAB expert obtained:
+
+| Middle-endpoint model | Exact | Balanced | MAE | Recall 40/50/60 |
+|---|---:|---:|---:|---|
+| Current global one-anchor | .167 | .167 | 16.25%RH | .25/.00/.25 |
+| True-place oracle | .333 | .333 | 8.33%RH | .25/.50/.25 |
+| Calibration-selected place | .250 | .250 | 10.00%RH | .25/.25/.25 |
+| Global forced-middle control | **.500** | **.500** | **6.67%RH** | **.25/.50/.75** |
+
+The global forced-middle control uses the same complete-run holdout and the same
+Initial centring but does not split prototypes by place. It preserves 40%
+recall and improves both 50% and 60%. Therefore the gain comes from a dedicated
+40/50/60 expert, not from place separation. Even correct place information is
+weaker than pooling independent runs, so a place mixture is not deployed.
+
+The forced-middle score is not yet a full application score: it assumes the
+sample is already known to be within 40--60%. The next leakage-safe stage must
+first classify a coarse band (`20--30`, `40--60`, `70--90`) on every held-out
+endpoint and invoke the middle expert only when that gate predicts `40--60`.
+
+Artifacts:
+
+- `output/rh_location_mixture_v1/metrics.json`
+- `output/rh_location_mixture_v1/predictions.csv`
+- `output/rh_location_mixture_v1/rh_location_mixture_validation.png`

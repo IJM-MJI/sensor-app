@@ -114,12 +114,21 @@ response-6 13 s frames with place-1 60% endpoints. Both requested frames are
 substantially closer than their own nominal 60% endpoints across all tested
 registered-droplet feature sets. Because 5/13 s are the supplied place-2 40%
 endpoints, this is evidence of a place-dependent optical coordinate shift, not
-a reason to relabel them 60%. The next RH model must be location/domain-aware.
+a reason to relabel them 60%. This motivated a direct location-mixture A/B.
+
+The location-mixture A/B then showed that Calibration cannot select the place
+reliably: both place-1 runs were correct, but both place-2 runs were assigned to
+place 1 (50% domain accuracy). The automatic place model scored .250 exact on
+40/50/60 endpoints and even the true-place oracle scored .333. A no-place,
+forced-middle prototype scored .500 exact with recalls .25/.50/.75 and MAE
+6.67%RH. Thus pooling runs is better than splitting locations; the place model
+is rejected. The next candidate is a coarse-band gate plus the global middle
+expert.
 
 ## Next actions
 
-1. Test a calibration-selected place-1/place-2 RH mixture while holding out a
-   complete independent run within each place.
+1. Build a complete-run-held-out coarse RH gate (`20--30`, `40--60`, `70--90`)
+   and invoke the global 40/50/60 expert only inside the middle band.
 2. Keep 5 s/13 s as their supplied 40% endpoints; do not use them as 60% labels.
 3. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
 4. Revisit the H2 2/3 gate only after an independent high-quality run supplies
