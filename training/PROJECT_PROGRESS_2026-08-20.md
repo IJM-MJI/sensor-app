@@ -141,21 +141,24 @@ the correct direction for 80--100% of stage transitions in every run, so the
 visual observation is present in the extracted sensor signal. The amount of
 hue travel is strongly run/location dependent, however: place-1 80% endpoints
 moved about 11--20 degrees, compared with 47--69 degrees in place 2. Ordered
-models did not transfer to a hidden run (best exact .355, balanced .321 across
-the tested candidates), and none passed the .85 per-stage rule. The app remains
+models did not transfer to a hidden run (best exact .367, balanced .321 across
+the tested candidates after removing an unavailable endpoint), and none passed
+the .85 per-stage rule. The app remains
 unchanged. The next existing-video feature experiment is paired-pixel hue-bin
 extraction from the registered droplet mask; independent LAB channel quantiles
 cannot represent the literal colour family reliably.
 
 Paired-pixel hue extraction was subsequently run on the registered droplet
-mask. On the strict 31-endpoint held-out set, named colour fractions raised
-exact accuracy from .355 to .387 and within-one-stage accuracy from .677 to
-.742, but balanced accuracy fell from .325 to .321 and MAE worsened from 12.10
-to 13.55%RH. It recovered some 40/50/80 endpoints while losing 70/90 and leaving
-60 at zero. The candidate is rejected, the app is unchanged, and the H2
-yellow-to-light-green extension is intentionally not started. A colour-family
-mask atlas is required next because both place-1 runs remain overwhelmingly
-yellow in the extracted pixels even where the user sees later colour families.
+mask. On the corrected 30-endpoint held-out set, named colour fractions raised
+exact accuracy from .333 to .433, balanced accuracy from .304 to .357,
+within-one-stage accuracy from .633 to .767, and lowered MAE from 13.33 to
+11.83%RH. It recovered 50/80 endpoints but left 40/60 at zero and reduced 90
+from 1.00 to .50. The candidate is rejected, the app is unchanged, and the H2
+yellow-to-light-green extension is intentionally not started. The completed
+colour-family atlas shows a broad-yellow quantization problem in place 1 and
+board/hardware mask contamination in place 2. It also removed an invalid 180 s
+substitute for the unavailable 189 s indoor-long endpoint; extra 9 s remains
+the valid 70% evidence.
 
 ## Next actions
 
@@ -168,9 +171,9 @@ yellow in the extracted pixels even where the user sees later colour families.
    least .85 recall in every deployed band/stage, not frame-random accuracy.
 4. Until that evidence exists, keep exact RH quantitation experimental and show
    an uncertainty/range result rather than silently applying this hierarchy.
-5. Render a raw-frame colour-family atlas for every RH endpoint. Verify whether
-   orange/scarlet/purple pixels are excluded by the mask or assigned to the
-   wrong hue bin; correct only the demonstrated failure and repeat the A/B.
+5. Tighten the response-run droplet mask against board edges/hardware and add
+   relative within-yellow hue/chroma/intensity features for place 1, then repeat
+   the same corrected 30-endpoint A/B.
 6. Apply the same paired-pixel idea to H2 yellow-to-light-green only if the RH
    correction improves exact and balanced accuracy without lowering any stage.
 7. Fit simultaneous H2 and H2O-only-referenced RH interference correction only

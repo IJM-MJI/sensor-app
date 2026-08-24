@@ -183,7 +183,7 @@ Artifacts:
 
 ## Human-guided yellow-to-purple colour path
 
-The user's visual hypothesis was tested directly on 31 rising-Reaction
+The user's visual hypothesis was tested directly on 30 available rising-Reaction
 endpoints: low RH is yellow, followed by orange, scarlet, and purple as RH
 increases. The analysis reconstructed each run's calibrated droplet colour and
 used LAB direction, circular hue change, chroma, warm/purple pixel fractions,
@@ -198,10 +198,10 @@ However, the magnitude was not transferable. At 80%, hue change was about
 runs. Even within the same place the scale differed substantially.
 
 Ordered threshold models improved markedly over a single straight-line ridge,
-but the best exact-endpoint candidate still reached only .355 exact/.307
-balanced accuracy (delta LAB), while the absolute-colour-plus-path candidate
-reached .290 exact/.321 balanced. No 40--70% candidate approached the required
-.85 per-stage recall. Cached raw-colour channel quantiles were also too coarse:
+but after removing the unavailable 189 s endpoint, the best exact-endpoint
+candidate still reached only .367 exact/.321 balanced accuracy. No 40--70%
+candidate approached the required .85 per-stage recall. Cached raw-colour
+channel quantiles were also too coarse:
 they summarize each channel separately and cannot preserve the paired pixel hue
 distribution that a person sees.
 
@@ -224,19 +224,19 @@ droplet mask rather than reconstructing hue from separate channel quantiles.
 It measured a 12-bin circular hue histogram, yellow/orange/scarlet/purple/green
 fractions, chroma, and lightness. Each held-out run supplied only its own low-RH
 calibration; all concentration fitting used the other runs. The comparison used
-the same 31 exact Reaction endpoints and retained the verified place-1 high-RH
-policy.
+the same 30 available exact Reaction endpoints and retained the verified
+place-1 high-RH policy.
 
 | Endpoint model | Exact | Balanced | Within one stage | MAE |
 |---|---:|---:|---:|---:|
-| Legacy registered-droplet delta LAB | .355 | .325 | .677 | 12.10%RH |
-| Named paired-pixel colour fractions | .387 | .321 | .742 | 13.55%RH |
-| Full histogram absolute + delta | .355 | .314 | .581 | 15.65%RH |
+| Legacy registered-droplet delta LAB | .333 | .304 | .633 | 13.33%RH |
+| Named paired-pixel colour fractions | .433 | .357 | .767 | 11.83%RH |
+| Full histogram absolute + delta | .200 | .143 | .567 | 17.17%RH |
 
-The named colour model recovered some 40%, 50%, and 80% endpoints, but 60%
-recall remained zero, 70% fell from .40 to zero, and 90% fell from 1.00 to .50.
-It improved exact accuracy but reduced balanced accuracy and increased MAE, so
-it fails the predeclared preservation and .85-per-stage criteria. It is not
+The named colour model recovered 50% and 80% endpoints, but 40/60% recall
+remained zero and 90% fell from 1.00 to .50. It improved exact accuracy,
+balanced accuracy, within-one-stage accuracy, and MAE, but failed the
+predeclared every-stage preservation and .85-per-stage criteria. It is not
 deployed and does not trigger the planned H2 yellow-to-light-green extension.
 
 The pixel audit also reveals an extraction mismatch that must be reviewed
@@ -255,3 +255,30 @@ Artifacts:
 - `output/rh_paired_pixel_hue_v1/predictions.csv`
 - `output/rh_paired_pixel_hue_v1/pixel_audit.csv`
 - `output/rh_paired_pixel_hue_v1/rh_paired_pixel_hue_validation.png`
+
+## Colour-family overlay atlas finding
+
+Four endpoint sheets now show RAW, the selected sensing pixels, their assigned
+family, and a zoom. They separate two distinct failures. In both place-1 runs,
+the mask follows the large/satellite droplets reasonably well; the extracted
+colour remains inside an overly broad yellow sector, so absolute family names
+discard the smaller relative hue/chroma/intensity change. In the place-2
+response runs, especially response-3, the registered zone also admits parts of
+the board edge, lower horizontal boundary, and right-side hardware. Those
+pixels inject purple/red counts unrelated to the droplet.
+
+The previously substituted indoor-long 180 s frame was also exposed by the
+atlas: its requested 70% endpoint was 189 s, outside the cropped cache. Exact
+endpoint selection now requires a decoded frame within .75 s, so that frame is
+removed; the valid extra-clip 9 s 70% endpoint remains.
+
+The next correction must therefore combine a tighter spatial/connected droplet
+mask for response runs with relative within-yellow trajectory features for
+place 1. Merely moving global yellow/orange boundaries cannot fix both domains.
+
+Artifacts:
+
+- `output/rh_colour_family_atlas_v1/rh-indoor-fast_colour_family_atlas.jpg`
+- `output/rh_colour_family_atlas_v1/rh-indoor-long_colour_family_atlas.jpg`
+- `output/rh_colour_family_atlas_v1/rh-response-3_colour_family_atlas.jpg`
+- `output/rh_colour_family_atlas_v1/rh-response-6_colour_family_atlas.jpg`

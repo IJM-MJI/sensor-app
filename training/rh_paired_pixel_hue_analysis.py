@@ -34,6 +34,7 @@ FEATURE_NAMES = (
 )
 NAMED_BINS = ("yellow", "orange", "scarlet", "purple", "green")
 HUE_EDGES = np.linspace(-180.0, 180.0, 13)
+ENDPOINT_TOLERANCE_SECONDS = .75
 
 
 def balanced(truth, prediction):
@@ -80,9 +81,14 @@ def endpoint_rows(cache_rows):
             if not rows or (video, float(seconds)) == PLACE1_PARTIAL:
                 continue
             row = min(rows, key=lambda value: abs(float(value["time"]) - seconds))
+            if abs(float(row["time"]) - float(seconds)) > ENDPOINT_TOLERANCE_SECONDS:
+                # Never substitute a clip's last available frame for a stated
+                # endpoint outside that clip (notably 189 s vs 180 s).
+                continue
             output.append({
                 "video": video, "group": str(row["group"]),
                 "time": float(row["time"]),
+                "requested_time": float(seconds),
                 "stage": 25.0 if supplied in (20, 30) else float(supplied),
                 "row": row,
             })

@@ -21,6 +21,7 @@ import numpy as np
 LEVELS = np.asarray([25, 40, 50, 60, 70, 80, 90], dtype=float)
 DISPLAY = ["20-30", "40", "50", "60", "70", "80", "90"]
 PLACE1_PARTIAL = ("1_90_H2O_only_2_extract.mp4", 140.0)
+ENDPOINT_TOLERANCE_SECONDS = .75
 
 # Supplied times are endpoints: the named RH is reached at the listed time.
 ENDPOINTS = {
@@ -141,6 +142,8 @@ def load_endpoints(cache):
         for seconds, supplied_rh in points:
             row = min(available, key=lambda r: abs(number(r, "time") - seconds))
             if (video, float(seconds)) == PLACE1_PARTIAL:
+                continue
+            if abs(number(row, "time") - float(seconds)) > ENDPOINT_TOLERANCE_SECONDS:
                 continue
             stage = 25.0 if supplied_rh in (20, 30) else float(supplied_rh)
             features = colour_features(row)
