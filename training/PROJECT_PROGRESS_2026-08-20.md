@@ -206,3 +206,20 @@ cross-run 40-vs-50 decision is therefore not identifiable reliably from these
 endpoints.  The next existing-video experiment should aggregate several late
 interval frames and report a 40--50 band unless an independently held-out run
 shows a reproducible within-yellow separation.
+
+### Place-1 indoor-long interpretation audit
+
+Per the user's visual interpretation, the indoor-long run was re-read as an
+ordered within-yellow path rather than global colour families.  Large-droplet
+hue at 20--30/40/50/60% was 102.54/99.77/97.84/95.95 degrees: a clean,
+approximately linear move from olive-yellow toward ochre/orange.  A
+leave-one-concentration-out linear interpolation within this run gave 25.45,
+39.73, 50.04, and 60.18%RH (MAE .23%RH).  Descriptive hue midpoints are
+101.15, 98.80, and 96.90 degrees.
+
+This is strong evidence that 40/50 is optically separable in indoor-long, but
+it is not an independent-run accuracy estimate.  Median lightness did not stay
+strictly ordered (50% was slightly lighter than 40%), so hue shift must be the
+primary feature and darkness only a low-weight confirmation.  These local
+thresholds must not be deployed globally until a second place-1 long-format
+run or late-interval pseudo-replicates validate them.
