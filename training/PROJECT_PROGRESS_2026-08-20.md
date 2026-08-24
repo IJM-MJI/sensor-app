@@ -320,3 +320,25 @@ continuous across the supplied endpoints. Therefore neither error is caused by
 a single bad boundary frame, and the timelines are unchanged. The remaining
 failure is a run-to-run response-scale mismatch, not an endpoint annotation
 mistake.
+
+### Place-2 run-local timeline-warp sensitivity
+
+The full response3 and response6 rising trajectories were predicted by a model
+trained on the opposite run.  The inferred 40--50/60--70/80--90 transitions
+did not share one constant delay.  Response3 crossed them at nominal RH
+45.7/52.5/75.6%, while response6 crossed them at 39.3/60.0/66.7%.  The implied
+boundary shifts span -8.3 to +10.7% RH and change sign within each run.  A
+single global time shift is therefore rejected; run-to-run response amplitude
+and local kinetics both matter.
+
+A diagnostic label-sensitivity test then applied the user's directional
+hypothesis. Moving response3's 40% endpoint from 5.0 to 6.13 s reduced pairwise
+exact/balanced accuracy from .875/.875 to .8125/.8125 and reduced the minimum
+band recall from .75 to .50.  Moving response6's 70% endpoint from 18.0 to
+16.67 s improved exact/balanced accuracy to .9375/.9375 and corrected the
+60--70 recall to 1.00, although 40--50 recall remained .75. Applying both
+shifts returned accuracy to .875 and minimum recall to .50.  Consequently the
+response6 high-range adjustment is a useful run-local calibration candidate,
+but the response3 shift is rejected. These values were chosen using the same
+two trajectories and are not independent validation, so neither change is
+deployed to the app.
