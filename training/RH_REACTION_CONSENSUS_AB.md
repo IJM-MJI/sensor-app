@@ -180,3 +180,39 @@ Artifacts:
 - `output/rh_coarse_middle_hierarchy_v1/metrics.json`
 - `output/rh_coarse_middle_hierarchy_v1/predictions.csv`
 - `output/rh_coarse_middle_hierarchy_v1/rh_coarse_middle_hierarchy.png`
+
+## Human-guided yellow-to-purple colour path
+
+The user's visual hypothesis was tested directly on 31 rising-Reaction
+endpoints: low RH is yellow, followed by orange, scarlet, and purple as RH
+increases. The analysis reconstructed each run's calibrated droplet colour and
+used LAB direction, circular hue change, chroma, warm/purple pixel fractions,
+and cached pixel-colour quantiles. Place-1 nominal 90 remained excluded as
+verified 70--80% interval evidence. Every score held out a complete run.
+
+The hypothesis is supported as a within-run trajectory. Background-corrected
+hue moved in one direction with RH at 100%, 80%, 100%, and 100% of consecutive
+stage transitions in indoor-fast, indoor-long, response-3, and response-6.
+However, the magnitude was not transferable. At 80%, hue change was about
+-20/-11 degrees in the two place-1 runs and -47/-69 degrees in the two place-2
+runs. Even within the same place the scale differed substantially.
+
+Ordered threshold models improved markedly over a single straight-line ridge,
+but the best exact-endpoint candidate still reached only .355 exact/.307
+balanced accuracy (delta LAB), while the absolute-colour-plus-path candidate
+reached .290 exact/.321 balanced. No 40--70% candidate approached the required
+.85 per-stage recall. Cached raw-colour channel quantiles were also too coarse:
+they summarize each channel separately and cannot preserve the paired pixel hue
+distribution that a person sees.
+
+Decision: retain the colour-path finding as a strong feature-design clue but do
+not deploy these models. A future extraction pass should calculate paired-pixel
+hue histograms inside the registered droplet mask (yellow/orange/scarlet/purple
+fractions) rather than trying to reconstruct literal colour from independent
+channel quantiles. That A/B must still use complete-run holdout.
+
+Artifacts:
+
+- `output/rh_human_color_path_v1/metrics.json`
+- `output/rh_human_color_path_v1/predictions.csv`
+- `output/rh_human_color_path_v1/rh_human_color_path_validation.png`

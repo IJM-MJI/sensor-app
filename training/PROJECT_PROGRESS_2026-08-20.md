@@ -135,6 +135,18 @@ recover 50%. The hierarchy is scientifically cleaner but is not deployable.
 See `RH_REACTION_CONSENSUS_AB.md` and
 `output/rh_coarse_middle_hierarchy_v1/`.
 
+The user-observed yellow -> orange -> scarlet -> purple RH path was then tested
+on exact Reaction endpoints. Initial-centred background-corrected hue followed
+the correct direction for 80--100% of stage transitions in every run, so the
+visual observation is present in the extracted sensor signal. The amount of
+hue travel is strongly run/location dependent, however: place-1 80% endpoints
+moved about 11--20 degrees, compared with 47--69 degrees in place 2. Ordered
+models did not transfer to a hidden run (best exact .355, balanced .321 across
+the tested candidates), and none passed the .85 per-stage rule. The app remains
+unchanged. The next existing-video feature experiment is paired-pixel hue-bin
+extraction from the registered droplet mask; independent LAB channel quantiles
+cannot represent the literal colour family reliably.
+
 ## Next actions
 
 1. Keep the place-1 nominal-90 reference as a 70--80% interval and place-2 90%
@@ -146,8 +158,11 @@ See `RH_REACTION_CONSENSUS_AB.md` and
    least .85 recall in every deployed band/stage, not frame-random accuracy.
 4. Until that evidence exists, keep exact RH quantitation experimental and show
    an uncertainty/range result rather than silently applying this hierarchy.
-5. Fit simultaneous H2 and H2O-only-referenced RH interference correction only
+5. Before new recording, add paired-pixel yellow/orange/scarlet/purple fractions
+   to the registered droplet extractor and run one final complete-run-held-out
+   colour-family A/B on the existing videos.
+6. Fit simultaneous H2 and H2O-only-referenced RH interference correction only
    after the RH-only reference model passes its held-out criterion.
-6. Revisit the H2 2/3 gate only after an independent high-quality run supplies
+7. Revisit the H2 2/3 gate only after an independent high-quality run supplies
    enough 2%/3% frames to test the .95 rule without using run 4 for selection.
-7. Perform independent photo/app validation and then freeze publication figures.
+8. Perform independent photo/app validation and then freeze publication figures.
