@@ -99,11 +99,23 @@ the nested selector found no feasible gate. The honest aggregate result did not
 improve 2% recall, so the gate was not deployed. Details are appended to
 `H2_23_QUALITY_RH20_AB.md`.
 
+## RH rising-Reaction consensus checkpoint
+
+The first RH-only follow-up now separates rising Reaction from the single
+daylight Recovery run and compares an Initial-centred logistic model with a
+leave-one-run-out consensus prototype. Consensus improves exact accuracy from
+.710 to .742, stage balance from .484 to .493, within-one-stage from .855 to
+.887, and MAE from 5.81 to 4.68%RH. It raises 40/50% recall to .50/.25, but 60%
+recall falls from .25 to zero and 80% falls from .50 to .25. It is not deployed.
+No endpoint label was changed. See `RH_REACTION_CONSENSUS_AB.md`.
+
 ## Next actions
 
-1. Repeat the same registered endpoint/quality audit for RH-only 40--60%, where
-   unseen-run confusion is currently largest.
-2. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
-3. Revisit the H2 2/3 gate only after an independent high-quality run supplies
+1. Human-audit the four rising-Reaction 60% endpoints in the aligned RH sheet;
+   distinguish valid full response from a transition endpoint.
+2. If valid, test a domain-normalized middle-stage expert; if transitional,
+   downgrade only the reviewed response endpoint to interval supervision.
+3. Fit simultaneous H2 and H2O-only-referenced RH interference correction.
+4. Revisit the H2 2/3 gate only after an independent high-quality run supplies
    enough 2%/3% frames to test the .95 rule without using run 4 for selection.
-4. Perform independent photo/app validation and then freeze publication figures.
+5. Perform independent photo/app validation and then freeze publication figures.
