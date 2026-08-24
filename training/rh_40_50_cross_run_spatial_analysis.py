@@ -43,6 +43,11 @@ def safe_summary(lab, mask):
     return paired_summary(lab, mask) if int(mask.sum()) >= 12 else None
 
 
+def lab_median(lab, mask):
+    pixels = lab[mask].astype(float)
+    return np.median(pixels, axis=0) if len(pixels) >= 12 else None
+
+
 def extract(items, video_root):
     by_video = defaultdict(list)
     for index, item in enumerate(items):
@@ -56,12 +61,26 @@ def extract(items, video_root):
             if not ok:
                 raise RuntimeError(f"Cannot decode {video} at {item['time']:.2f}s")
             frame = resize_for_app(frame)
-            lab, _, selected = balanced_frame_and_masks(frame, item["row"])
+            lab, flame, selected = balanced_frame_and_masks(frame, item["row"])
             circle = tuple(int(float(item["row"][name]))
                            for name in ("circle_x", "circle_y", "circle_r"))
             main, _ = tight_masks(lab.shape, circle, item["row"], selected)
             lx, ly = local_coordinates(lab.shape, circle, item["row"])
             radius = np.sqrt((lx / .215) ** 2 + (ly / .245) ** 2)
+            satellite = ((lx - .30) / .14) ** 2 + ((ly - .02) / .18) ** 2 <= 1
+            # A close substrate annulus experiences the same exposure and WB
+            # as the droplet. Remove the satellite, sensing ink, and extreme
+            # dark/bright hardware before taking its robust LAB median.
+            substrate = (radius >= 1.12) & (radius <= 1.58) & ~satellite & ~flame
+            light = lab[:, :, 0].astype(float)
+            chroma = np.hypot(lab[:, :, 1].astype(float) - 128,
+                              lab[:, :, 2].astype(float) - 128)
+            candidate = substrate & (light >= 55) & (light <= 235) & (chroma <= 35)
+            if int(candidate.sum()) >= 30:
+                lo, hi = np.percentile(light[candidate], (15, 85))
+                substrate = candidate & (light >= lo) & (light <= hi)
+            else:
+                substrate = candidate
             zones = {
                 "whole": main,
                 "core": main & (radius <= .58),
@@ -73,6 +92,13 @@ def extract(items, video_root):
             }
             output[index] = {name: safe_summary(lab, mask) for name, mask in zones.items()}
             output[index]["counts"] = {name: int(mask.sum()) for name, mask in zones.items()}
+            output[index]["controls"] = {
+                "drop_lab": lab_median(lab, main),
+                "flame_lab": lab_median(lab, flame),
+                "substrate_lab": lab_median(lab, substrate),
+            }
+            output[index]["counts"].update({"flame": int(flame.sum()),
+                                             "substrate": int(substrate.sum())})
         cap.release()
     return output
 
@@ -105,6 +131,11 @@ def build(items, summaries):
             baseline[group][region] = None if not valid else {
                 key: np.median(np.asarray([value[key] for value in valid]), axis=0)
                 for key in ("circular", "chroma", "lightness", "named")}
+        for control in ("drop_lab", "flame_lab", "substrate_lab"):
+            valid = [summaries[index]["controls"][control] for index in indices
+                     if summaries[index]["controls"][control] is not None]
+            baseline[group][control] = (None if not valid else
+                                        np.median(np.asarray(valid), axis=0))
     matrices = defaultdict(list); audit = []
     for item, summary in zip(items, summaries):
         if item["stage"] not in LEVELS:
@@ -114,12 +145,34 @@ def build(items, summaries):
         for region in REGIONS:
             values, flag = vector(summary[region], baseline[item["group"]][region])
             spatial.extend(values); present.append(flag)
+        controls = summary["controls"]
+        base = baseline[item["group"]]
+        control_deltas = {}
+        for name in ("drop_lab", "flame_lab", "substrate_lab"):
+            control_deltas[name] = (np.zeros(3) if controls[name] is None or base[name] is None
+                                    else controls[name] - base[name])
+        background_corrected = (control_deltas["drop_lab"]
+                                - control_deltas["substrate_lab"])
+        flame_corrected = control_deltas["drop_lab"] - control_deltas["flame_lab"]
+        dual = np.concatenate([background_corrected, flame_corrected,
+                               control_deltas["drop_lab"]])
         matrices["whole_relative"].append(whole)
         matrices["spatial_relative"].append(np.concatenate([spatial, present]))
+        matrices["background_control"].append(background_corrected)
+        matrices["flame_control"].append(flame_corrected)
+        matrices["dual_control"].append(dual)
+        matrices["spatial_dual_control"].append(
+            np.concatenate([spatial, present, dual]))
         audit.append({"group": item["group"], "video": item["video"],
                       "time": item["time"], "reference": item["stage"],
                       **{f"{region}_pixels": summary["counts"][region]
-                         for region in REGIONS}})
+                         for region in REGIONS},
+                      "flame_pixels": summary["counts"]["flame"],
+                      "substrate_pixels": summary["counts"]["substrate"],
+                      **{f"drop_minus_bg_{channel}": background_corrected[index]
+                         for index, channel in enumerate("Lab")},
+                      **{f"drop_minus_flame_{channel}": flame_corrected[index]
+                         for index, channel in enumerate("Lab")}})
     return {name: np.asarray(value) for name, value in matrices.items()}, audit
 
 
@@ -186,8 +239,8 @@ def main():
     for filename, rows in (("roi_audit.csv", audit), ("predictions.csv", predictions)):
         with (args.output / filename).open("w", newline="", encoding="utf-8-sig") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0])); writer.writeheader(); writer.writerows(rows)
-    fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.8), constrained_layout=True)
-    for axis, name in zip(axes, results):
+    fig, axes = plt.subplots(2, 3, figsize=(11.2, 7.0), constrained_layout=True)
+    for axis, name in zip(axes.flat, results):
         matrix = np.asarray(results[name]["confusion"], float)
         norm = matrix / np.maximum(matrix.sum(axis=1, keepdims=True), 1)
         axis.imshow(norm, cmap="Blues", vmin=0, vmax=1)
@@ -195,6 +248,8 @@ def main():
             for c in range(2): axis.text(c, r, f"{norm[r,c]:.2f}", ha="center", va="center")
         axis.set_xticks((0,1),("40","50")); axis.set_yticks((0,1),("40","50"))
         axis.set(xlabel="Predicted RH", ylabel="Reference RH", title=name)
+    for axis in list(axes.flat)[len(results):]:
+        axis.axis("off")
     fig.suptitle("Cross-run RH40/50 large-droplet spatial A/B", fontweight="bold")
     fig.savefig(args.output / "rh_40_50_cross_run_spatial_validation.png", dpi=220)
     plt.close(fig)

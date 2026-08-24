@@ -273,3 +273,13 @@ a visible 40-to-50 darkening/orange tendency, but its magnitude and whole-frame
 exposure shift differ substantially by run. Current per-run endpoint evidence
 is insufficient to learn a transferable exact 40/50 boundary. The spatial
 candidate is not deployed; 40--50 remains the honest cross-run output band.
+
+The follow-up illumination-control A/B subtracted both nearby-substrate change
+and the nominally invariant H2=0 flame change from the large-droplet LAB
+response. Nearby-substrate correction scored .250 exact/balanced; flame and
+dual controls scored .500/.500. Adding dual controls to the spatial model left
+the previous .625/.625 result and 40/50 recalls 1.00/.25 unchanged. The control
+regions had ample pixels, so this is not a missing-mask failure. Predictions
+still separated mainly by run/location, showing that a simple global exposure
+offset is not the dominant source of non-transferability. No corrected model
+is deployed.
