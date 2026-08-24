@@ -293,3 +293,19 @@ balanced, and .967 within one adjacent range. Per-range recalls were
 1.00/.375/.375/.667. The high adjacent-range score confirms that most errors
 are one-band scale shifts between runs, but neither the middle ranges nor the
 .85 deployment rule passed. The four-range model is therefore not deployed.
+
+### Place-2 response3/response6 pairwise ranges
+
+Place 1 was intentionally deferred because FAST and long differ in lighting,
+ROI quality, and response scale. For place 2, response3 was trained and
+response6 held out, then the direction was reversed, using a fixed regularized
+model rather than test-fold tuning. Nearby-substrate correction reached .875
+exact/.875 balanced in both directions and 1.00 within one band. Combined
+recalls for 20--30/40--50/60--70/80--90 were 1.00/.75/.75/1.00. The two errors
+were response3 40% predicted 20--30 and response6 70% predicted 80--90.
+
+This is promising evidence that a place-2 profile is viable, but it does not
+pass the predeclared .85 recall in every band. Feature selection also cannot be
+independently confirmed with only these two runs, so it remains experimental
+and is not yet deployed to the app. A third independent place-2 rising run is
+the clean validation needed before freezing this profile.
