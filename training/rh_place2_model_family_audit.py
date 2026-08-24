@@ -96,6 +96,25 @@ def main():
                                  row["balanced_accuracy"], row["exact_accuracy"]),
                 reverse=True)
     best = ranked[0]
+    scaler = StandardScaler().fit(matrices["background_control"])
+    endpoint_model = {
+        "schema_version": 1,
+        "task": "RH",
+        "profile": "place2_endpoint_experimental",
+        "type": "standardized_1nn",
+        "feature_extractor": "app-tight-drop-minus-near-substrate-v1",
+        "features": ["drop_minus_substrate_L", "drop_minus_substrate_a",
+                     "drop_minus_substrate_b"],
+        "classes": truth.astype(float).tolist(),
+        "levels": [25.0, 45.0, 65.0, 85.0],
+        "display_levels": ["20–30", "40–50", "60–70", "80–90"],
+        "scaler_mean": scaler.mean_.astype(float).tolist(),
+        "scaler_scale": scaler.scale_.astype(float).tolist(),
+        "prototypes": matrices["background_control"].astype(float).tolist(),
+        "source_groups": groups.tolist(),
+        "response6_70_time_seconds": 16.67,
+        "scope": "H2O-only, full-response endpoint photographs",
+    }
     decision = {
         "passes_0_85_all_classes": bool(best["exact_accuracy"] >= .85
                                          and best["balanced_accuracy"] >= .85
@@ -106,6 +125,8 @@ def main():
     payload = {"scope": "response3 original endpoints; response6 70% moved 18.0 to 16.67 s",
                "best": best, "decision": decision, "ranked": ranked}
     (args.output / "metrics.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    (args.output / "experimental_model.json").write_text(
+        json.dumps(endpoint_model, indent=2), encoding="utf-8")
     plot(args.output, ranked)
     print(json.dumps({"best": best, "decision": decision}, indent=2))
 

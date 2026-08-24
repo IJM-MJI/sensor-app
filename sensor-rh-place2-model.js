@@ -1,0 +1,29 @@
+window.SENSOR_RH_PLACE2_ENDPOINT_MODEL={
+  "schema_version":1,
+  "task":"RH",
+  "profile":"place2_endpoint_experimental",
+  "type":"standardized_1nn",
+  "feature_extractor":"app-tight-drop-minus-near-substrate-v1",
+  "features":["drop_minus_substrate_L","drop_minus_substrate_a","drop_minus_substrate_b"],
+  "classes":[25,25,45,45,65,65,85,85,25,25,45,45,65,65,85,85],
+  "levels":[25,45,65,85],
+  "display_levels":["20–30","40–50","60–70","80–90"],
+  "scaler_mean":[-7.099122133134987,3.6875,-0.5],
+  "scaler_scale":[5.737250455424666,3.2349410736518833,4.366062299143245],
+  "prototypes":[
+    [-0.05690574985182195,0,-0.5],[0.05690574985180774,0,0.5],
+    [-2.5531645077594476,2,4.5],[-4.274475983169282,3,3.5],
+    [-7.44492575197971,5,1.5],[-10.225126650737295,6,1.5],
+    [-12.09457208266052,8,-2.5],[-15.463000573333211,9,-11.5],
+    [1.6586538461538396,0,-2],[-1.6586538461538538,0,2],
+    [-4.580951143451159,1,2],[-9.283653846153854,2,4],
+    [-7.751591454472745,3,0],[-8.555715834961433,4,1],
+    [-12.129014670896126,6,-2],[-19.22976163058499,10,-10]
+  ],
+  "source_groups":["rh-response-6","rh-response-6","rh-response-6","rh-response-6",
+    "rh-response-6","rh-response-6","rh-response-6","rh-response-6",
+    "rh-response-3","rh-response-3","rh-response-3","rh-response-3",
+    "rh-response-3","rh-response-3","rh-response-3","rh-response-3"],
+  "response6_70_time_seconds":16.67,
+  "scope":"H2O-only, full-response endpoint photographs"
+};

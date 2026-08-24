@@ -368,3 +368,20 @@ short interval contains appreciable ramp progression. The defensible current
 candidate is therefore an endpoint/full-response range model, not a general
 ramp-frame model. It remains undeployed until it is tested on an independent
 place-2 run or in a clearly marked experimental app profile.
+
+### Experimental app profile
+
+The endpoint candidate was exported as `sensor-rh-place2-model.js` and wired
+into the app only after the four-state classifier selects H2O-only. The app now
+extracts the same tight registered main-droplet median and nearby-substrate
+median used by the offline model, subtracts their RH20 calibration difference,
+standardizes the resulting LAB vector, and applies the 16-prototype 1-NN
+profile. Existing H2 quantitation, simultaneous-number suppression, and state
+classification are unchanged. The UI labels this output `Place-2 endpoint
+experimental` and includes the nearest-prototype distance as `rhD`.
+
+JavaScript syntax, all 16 exported prototype labels, asset loading, and the
+visible app version were verified locally. The automated browser had no camera,
+so real/monitor-captured endpoint validation remains the next required step.
+The exact calibration frames, endpoints, expected ranges, repetitions, and
+acceptance rule are recorded in `PLACE2_RH_APP_TEST.md`.
