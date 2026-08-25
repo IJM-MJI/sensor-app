@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Direct low-response recovery v7</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · H2 state-gate diagnostic v8</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,7 +216,7 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.25-direct-low-response-recovery-v7';
+var APP_VERSION='2026.08.25-h2-state-gate-diagnostic-v8';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -594,7 +594,20 @@ doClassify=function(f){
   var rh=!uncertain&&(state==='H2O_only'||state==='simultaneous');
   var h2p=(stateProb.H2_only||0)+(stateProb.simultaneous||0);
   var rhp=(stateProb.H2O_only||0)+(stateProb.simultaneous||0);
+  // Independent H2-only evidence is intentionally kept separate from the
+  // four-state forest.  The former was trained as a flame-centred binary
+  // detector; comparing both outputs lets us distinguish a genuine flame
+  // response from an RH-only frame that merely receives a high four-state
+  // H2 probability.  Diagnostic v8 does not override a state yet.
+  var h2Expertp=null;
+  if(calibrated&&window.SENSOR_MODEL&&SENSOR_MODEL.h2_presence){
+    var h2ExpertVector=stateFeatures(SENSOR_MODEL.h2_presence,f);
+    h2Expertp=forestProb(SENSOR_MODEL.h2_presence,h2ExpertVector);
+  }
   var h2Quant=null,rhQuant=null,rhEndpointShadow=null,rhSimPending=state==='simultaneous';
+  var h2Diagnostic=null;
+  if(calibrated&&window.SENSOR_CONCENTRATION_MODEL)
+    h2Diagnostic=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
   if(calibrated&&window.SENSOR_RH_PLACE2_ENDPOINT_MODEL)
     rhEndpointShadow=place2EndpointRhBand(SENSOR_RH_PLACE2_ENDPOINT_MODEL,f);
   // A low-RH monitor frame can be darker than calibration while showing no
@@ -613,7 +626,7 @@ doClassify=function(f){
     lowResponseRecovered=true;
   }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
-    h2Quant=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
+    h2Quant=h2Diagnostic;
     if(!rhSimPending){
       rhQuant=(state==='H2O_only'&&rhEndpointShadow)?
         rhEndpointShadow:
@@ -632,6 +645,7 @@ doClassify=function(f){
   }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,rhSimPending:rhSimPending,
+    h2Diagnostic:h2Diagnostic,h2Expertp:h2Expertp,
     lowResponseRecovered:lowResponseRecovered,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
@@ -662,7 +676,8 @@ function showResult(r){
     (shadow.vector?' v=('+shadow.vector.map(function(x){return x.toFixed(1);}).join(',')+')':'')):' ';
   var vals=(r.h2p===undefined?'':'pH2='+r.h2p+' pRH='+r.rhp+
     (r.stateConfidence===undefined?'':' pState='+r.stateConfidence+' gap='+r.stateGap)+'  ')
-    +(r.h2Quant&&r.h2Quant.raw!=null?' rawH2='+r.h2Quant.raw.toFixed(2):'')
+    +(r.h2Expertp!=null?' pH2x='+r.h2Expertp.toFixed(2):'')
+    +(r.h2Diagnostic&&r.h2Diagnostic.raw!=null?' rawH2='+r.h2Diagnostic.raw.toFixed(2):'')
     +(r.rhQuant&&r.rhQuant.raw!=null?' rawRH='+r.rhQuant.raw.toFixed(1):'')+' '
     +(r.rhQuant&&r.rhQuant.distance!=null?' rhD='+r.rhQuant.distance.toFixed(2):'')+' '
     +shadowVals+(r.lowResponseRecovered?' lowGuard=1':'')+' '
