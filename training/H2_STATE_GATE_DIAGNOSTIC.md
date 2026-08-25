@@ -56,3 +56,23 @@ The >=1% policy improves H2-only recall without reducing the RH-only result and
 is therefore used for the next exported four-state model.  The RH-only
 low-response post-processing threshold remains disabled until this retrained
 model is repeated on the supplied app frames.
+
+## v9 app repeat and v10 guard
+
+The repeated H2 endpoints produced `rawH2=0.25, 1.47, 3.44, 5.25`.  The 2--4%
+states remained H2-only, while the nominal 1% frame remained optically
+indistinguishable from Initial.  It must not be promoted solely from its
+timeline label.
+
+The response3 RH-only frames produced `rawH2=0.04, -2.18, 0.42`.  The first was
+Uncertain, the second became a low-confidence false H2-only, and the third was
+correctly H2O-only.  Version v10 recovers Initial only when all of these hold:
+
+- the direct RH endpoint vector has no chromatic change;
+- `-3.0 <= rawH2 <= 0.10`;
+- the state is Uncertain, or H2-only with maximum state probability below 0.45.
+
+The lower raw bound preserves the previously identified `rawH2=-7.06` gross
+H2 extrapolation as Uncertain instead of silently converting it to Initial.
+The rule does not affect the supplied H2 endpoint values or the response3
+2.5 s H2O-only result.

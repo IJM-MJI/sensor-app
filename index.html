@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Low-H2 state model v9</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · Optical H2 guard v10</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,7 +216,7 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260825-5"></script>
 <script>
-var APP_VERSION='2026.08.25-low-h2-state-model-v9';
+var APP_VERSION='2026.08.25-optical-h2-guard-v10';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -611,17 +611,24 @@ doClassify=function(f){
   if(calibrated&&window.SENSOR_RH_PLACE2_ENDPOINT_MODEL)
     rhEndpointShadow=place2EndpointRhBand(SENSOR_RH_PLACE2_ENDPOINT_MODEL,f);
   // A low-RH monitor frame can be darker than calibration while showing no
-  // chromatic gas response. If the four-class forest is uncertain and the H2
-  // probability is also low, recover the physically consistent initial state
-  // instead of asking for an endless retake. H2/simultaneous candidates are
-  // intentionally excluded by the h2p guard.
+  // chromatic gas response. App-domain v9 repeats separated genuine H2
+  // endpoints (rawH2 0.25, 1.47, 3.44, 5.25) from the two RH-only errors
+  // (0.04 and -2.18). Recover Initial only inside that observed no-response
+  // interval, with the independent low-chroma RH guard and low state
+  // confidence. The lower bound deliberately excludes the known gross H2
+  // extrapolation at rawH2=-7.06 rather than silently calling it Initial.
   var lowResponseRecovered=false;
   var shadowVector=rhEndpointShadow&&rhEndpointShadow.vector;
   var shadowLimit=window.SENSOR_RH_PLACE2_ENDPOINT_MODEL&&
     SENSOR_RH_PLACE2_ENDPOINT_MODEL.low_chroma_abs_ab_max;
   var directLowChroma=shadowVector&&isFinite(shadowLimit)&&
     Math.abs(shadowVector[1])<=shadowLimit&&Math.abs(shadowVector[2])<=shadowLimit;
-  if(uncertain&&directLowChroma&&h2p<.25){
+  var rawH2Diagnostic=h2Diagnostic&&h2Diagnostic.raw;
+  var opticallyNoH2=isFinite(rawH2Diagnostic)&&
+    rawH2Diagnostic>=-3.0&&rawH2Diagnostic<=0.10;
+  var lowConfidenceH2Candidate=uncertain||
+    (state==='H2_only'&&maxProb<.45);
+  if(directLowChroma&&opticallyNoH2&&lowConfidenceH2Candidate){
     uncertain=false;state='initial';h2=false;rh=false;rhSimPending=false;
     lowResponseRecovered=true;
   }
