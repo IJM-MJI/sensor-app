@@ -67,7 +67,10 @@ H2_FEATURE_PROFILE = "base"
 H2_RAMP_ENDPOINTS = {
     "1_90_H2_only_test.mp4": [(0, 0), (15, 1), (25, 2), (30, 3), (40, 4)],
     "1_90_H2_only_test_2.mp4": [(0, 0), (4, 0), (13, 1), (21, 2), (30, 3), (51, 4)],
-    "1_90_H2_only_test_3.MOV": [(0, 0), (3, 0), (10, 1), (20, 2), (28, 3), (152, 4)],
+    # The controller nominally continued toward 4%, but fixed-mask comparison
+    # with the trustworthy test_2 reference shows that this run reaches only a
+    # 3%-equivalent optical response.  Do not teach its late frames as 4%.
+    "1_90_H2_only_test_3.MOV": [(0, 0), (3, 0), (10, 1), (20, 2), (28, 3), (152, 3)],
     "1_90_H2_only_4.mp4": [(0, 0), (5, 0), (13, 1), (30, 2), (109, 3), (122, 4)],
     "1_90_H2_only_5.mp4": [(0, 0), (5, 0), (8, 1), (13, 2), (21, 3), (130, 4)],
 }
