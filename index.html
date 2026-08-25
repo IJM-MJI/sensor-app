@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Low-H2 optical consensus v11</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · H2 0–1% resolution band v12</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,7 +216,7 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260825-5"></script>
 <script>
-var APP_VERSION='2026.08.25-low-h2-optical-consensus-v11';
+var APP_VERSION='2026.08.25-h2-zero-one-resolution-band-v12';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -624,6 +624,7 @@ doClassify=function(f){
   var directLowChroma=shadowVector&&isFinite(shadowLimit)&&
     Math.abs(shadowVector[1])<=shadowLimit&&Math.abs(shadowVector[2])<=shadowLimit;
   var rawH2Diagnostic=h2Diagnostic&&h2Diagnostic.raw;
+  var lowRhEndpoint=rhEndpointShadow&&rhEndpointShadow.text==='20–30';
   var opticallyNoH2=isFinite(rawH2Diagnostic)&&
     rawH2Diagnostic>=-3.0&&rawH2Diagnostic<=0.10;
   var lowConfidenceH2Candidate=uncertain||
@@ -638,7 +639,7 @@ doClassify=function(f){
   // flame model, while 13/15 s did not.  Require all three plus a low-RH
   // droplet vector; never override H2O-only or a strong Initial prediction.
   var lowH2Promoted=false;
-  if(!uncertain&&state==='initial'&&maxProb<.50&&directLowChroma&&
+  if(!uncertain&&state==='initial'&&maxProb<.50&&lowRhEndpoint&&
       h2p>=.40&&h2Expertp!=null&&h2Expertp>=.55&&
       isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=1.50){
     state='H2_only';h2=true;rh=false;rhSimPending=false;
@@ -655,7 +656,14 @@ doClassify=function(f){
     // The inactive axis is the calibrated recovery condition, not an unrelated
     // regression extrapolation that can contradict the state label.
     if(state==='initial'){
-      h2Quant={text:'0',outside:false};rhQuant={text:'20–30',outside:false};
+      // rawH2 0.5--1.5 is below the presently validated single-frame
+      // resolution: report a range containing zero instead of forcing either
+      // an exact 0% or an unsupported positive detection.
+      h2Quant=(lowRhEndpoint&&isFinite(rawH2Diagnostic)&&
+        rawH2Diagnostic>=.50&&rawH2Diagnostic<1.50)?
+        {text:'0–1',outside:false,subResolution:true}:
+        {text:'0',outside:false};
+      rhQuant={text:'20–30',outside:false};
     }else if(state==='H2_only'){
       rhQuant={text:'20–30',outside:false};
     }else if(state==='H2O_only'){

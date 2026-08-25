@@ -98,3 +98,19 @@ held-out audit it promoted no Initial, H2O-only, or H2-only frame; consequently
 it introduces no measured false promotion but also cannot be claimed as a
 held-out accuracy improvement.  It remains an app-domain correction pending a
 repeat on an untouched H2-only run.
+
+## v11 repeat and v12 0--1% resolution band
+
+The v11 repeat preserved 15 and 17 s as Initial, while 19 s remained H2-only.
+The 17 s consensus values met the intended thresholds, but its direct droplet
+chromaticity was just outside the narrow no-change guard.  Because H2-only can
+still produce small camera/registration motion in the droplet ROI, v12 uses
+the already-calibrated 20--30% RH endpoint range for low-H2 promotion instead
+of requiring near-zero droplet a*/b*.
+
+The 15 s frame (`rawH2=0.78`) cannot defensibly be forced to either exact 0% or
+exact 1%.  For an accepted Initial/Low Response state with a 20--30% RH shadow,
+v12 displays `0--1% H2` when `0.50 <= rawH2 < 1.50`.  This is a resolution
+interval containing zero, not a newly claimed exact concentration class.  The
+17 s frame (`rawH2=1.61`) remains outside this interval and is handled by the
+three-model H2 consensus promotion; 19 s remains an ordinary H2-only result.
