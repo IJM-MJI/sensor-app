@@ -39,3 +39,37 @@ App diagnostic v2 therefore:
 The next repeat needs 0.5-second calibration followed by all eight endpoints:
 2, 3, 5, 7, 11, 25, 28, and 38 seconds. The shadow output is the RH-model result;
 the main state label remains the independent four-state result.
+
+## Diagnostic-v2 repeat and root cause
+
+The repeat supplied all eight endpoints after calibration. It proved that the
+calibration anchor itself was wrong: every selected circle after the first
+failure was a reflection on the lower-left metal rim, not the chamber window.
+
+| Time | selected circle `(x,y,r)` | shadow RH | valid? |
+|---:|---|---|---|
+| 2 s | no circle | none | no |
+| 3 s | `(63,349,62)` | 80--90 | no |
+| 5 s | `(87,357,103)` | 20--30 | no |
+| 7 s | `(64,303,71)` | 80--90 | no |
+| 11 s | `(105,331,88)` | 20--30 | no |
+| 25 s | `(73,373,52)` | 60--70 | no |
+| 28 s | `(73,325,57)` | 40--50 | no |
+| 38 s | `(58,343,63)` | 20--30 | no |
+
+No RH accuracy conclusion can be drawn from these outputs because the RH
+feature pixels came entirely from metal. The changing state labels are also
+invalid for the same reason.
+
+Response3 ROI fix v3 expands the maximum Hough radius for tightly cropped
+frames and rejects candidates outside a central-chamber geometry envelope
+before either scoring or calibration anchoring. The supplied original video
+was audited at 0.5, 2, 3, 5, 7, 11, 25, 28, and 38 seconds. All nine selected
+circles stayed on the chamber window: `x=125--136`, `y=188--205`, and
+`r=71--75` after 480-pixel resizing. The reproducible audit is
+`training/audit_response3_circle_roi.py`; its CSV and review sheet are written
+under `training/output/response3_roi_audit/`.
+
+For the next app repeat, first inspect the calibration overlay. Its red/yellow
+circle must enclose the central chamber window. If it is on metal, stop and
+send only that calibration screenshot; do not continue the endpoint sequence.

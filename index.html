@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Response3 diagnostic v2</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · Response3 ROI fix v3</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,7 +216,7 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-1"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.25-response3-diagnostic-v2';
+var APP_VERSION='2026.08.25-response3-roi-fix-v3';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -927,7 +927,7 @@ function processFrame(){
 
 function detectAndClassify(src){
   var h=src.rows, w=src.cols;
-  var bCx,bCy,bR,nCircles=0,bBr=255,roiSource='auto',bScore=-1;
+  var bCx,bCy,bR,nCircles=0,nValidCircles=0,bBr=255,roiSource='auto',bScore=-1;
 
   if(manualROI){
     // Manual ROI: fixed position
@@ -943,7 +943,10 @@ function detectAndClassify(src){
     var blurred=new cv.Mat();
     cv.GaussianBlur(gray,blurred,new cv.Size(9,9),2);
     var minR=Math.round(Math.min(h,w)*0.07);
-    var maxR=Math.round(Math.min(h,w)*0.42);
+    // Screen-captured / tightly cropped chamber frames can make the real window
+    // larger than the old 42% limit.  That limit excluded the chamber and left
+    // only small circular metal reflections for selection.
+    var maxR=Math.round(Math.min(h,w)*0.60);
     var circles=new cv.Mat();
     cv.HoughCircles(blurred,circles,cv.HOUGH_GRADIENT,1.2,
       Math.round(Math.min(h,w)*0.12),80,35,minR,maxR);
@@ -972,6 +975,14 @@ function detectAndClassify(src){
       var cx=Math.round(circles.data32F[i*3]);
       var cy=Math.round(circles.data32F[i*3+1]);
       var r=Math.round(circles.data32F[i*3+2]);
+      var nx=cx/w,ny=cy/h,nr=r/Math.min(h,w);
+      // The sensing window is central. Reflections on the lower-left chamber
+      // rim are circular too, but cannot be used as a colour ROI.  Reject them
+      // before scoring and, critically, before saving a calibration anchor.
+      // Bounds cover both full-camera and tightly cropped saved frames.
+      var centralWindow=nx>=.24&&nx<=.76&&ny>=.15&&ny<=.65&&nr>=.20&&nr<=.60;
+      if(!centralWindow)continue;
+      nValidCircles++;
       var ir=Math.round(r*0.5);
       var sum=0,cnt=0,chromaCnt=0,minWarmY=1e9,maxWarmY=-1;
       for(var dy=-ir;dy<=ir;dy+=3){
@@ -990,7 +1001,9 @@ function detectAndClassify(src){
       var avg=cnt>0?sum/cnt:0;
       var coverage=cnt>0?chromaCnt/cnt:0;
       var span=maxWarmY>=minWarmY?(maxWarmY-minWarmY)/Math.max(r,1):0;
-      var score=(cy>h*0.50)?0:(coverage+0.05*Math.min(span,1.8))*Math.sqrt(r/Math.min(h,w));
+      var centerDx=(nx-.50)/.30,centerDy=(ny-.43)/.30;
+      var centerPrior=Math.exp(-.5*(centerDx*centerDx+centerDy*centerDy));
+      var score=(coverage+0.05*Math.min(span,1.8))*Math.sqrt(nr)+.08*centerPrior;
       // Saved frames from one run must not jump between the chamber window and
       // a smaller sample/metal circle. After calibration, strongly prefer the
       // Hough candidate nearest to the calibrated normalized circle while
@@ -1008,6 +1021,9 @@ function detectAndClassify(src){
     if(calibrated&&circleRegistration)roiSource='auto-anchor';
     circles.delete(); gray.delete(); selLab.delete();
 
+    if(nValidCircles===0)
+      return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,
+        dbg:'No central chamber circle found — align/retake'};
     if(bBr<80)
       return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'Circle too dark'};
   }
@@ -1238,7 +1254,8 @@ function detectAndClassify(src){
     ' pRH='+(clf.rhp==null?'-':Number(clf.rhp).toFixed(3))+
     (calibrated?' [CAL]':' [DEF]')+' ['+roiSource+'] '+APP_VERSION;
   clf._dbgGeo={cx:bCx,cy:bCy,r:bR,innerR:innerR,w:w,h:h,
-    totalCircles:nCircles,brightness:Math.round(bBr),roiSource:roiSource,
+    totalCircles:nCircles,validCircles:nValidCircles,
+    brightness:Math.round(bBr),roiSource:roiSource,
     chromaScore:bScore<0?null:Math.round(bScore*100),
     nPx:n,nTop:topPx.length,nBg:bgPx.length,
     nHiC:flamePx.length+dropPx.length,nDropRegistered:dropRegisteredPx.length,
@@ -1269,7 +1286,7 @@ function drawDebugOverlay(r){
   dx.font='bold 14px sans-serif';
   dx.fillStyle='rgba(0,0,0,0.7)';
   dx.fillRect(4,4,220,130);
-  var src=g.roiSource==='manual'?'Manual ROI':'HoughCircles: '+g.totalCircles+' found';
+  var src=g.roiSource==='manual'?'Manual ROI':'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central';
   dx.fillStyle='#fff';dx.fillText(src,10,20);
   dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness
     +(g.chromaScore===null?'':' chroma='+g.chromaScore+'%'),10,36);
