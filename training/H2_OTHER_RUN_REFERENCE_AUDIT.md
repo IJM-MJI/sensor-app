@@ -83,3 +83,35 @@ the dominant green-channel change places it roughly between 2% and 3%.
 The run therefore does **not** supply a test_2-equivalent 4% example.  It is
 useful as weak 2--3% augmentation and as a complete reaction/recovery state run,
 but it must not supervise the exact 4% class.
+
+## All cropped RH20 runs
+
+The remaining cropped RH20 videos were then audited with the same fixed-flame
+method.  Reaction labels use the final ten seconds before the supplied reaction
+boundary.  Recovery validation uses only the final two seconds because the
+supplied recovery endpoint, rather than its start, is the fully recovered state.
+
+| Run | Reaction window | Late median Δa* | test_2-equivalent stage | Training use |
+|---|---:|---:|---:|---|
+| run 2 x2 | 50--60 s | -1.51 | 2% | weak 1--2% / ordering |
+| run 3 x2 | 50--60 s | -2.09 | 2% (toward 3%) | weak 2--3% |
+| run 4 | 110--120 s | -2.88 | 3% | useful weak 3% |
+| run 5 x2 | 44--54 s | -3.46 | 3% | strongest additional weak 3% |
+| run 5 normal | 80--90 s | -2.42 | 2%, occasionally 3% | weak 2--3% / ordering |
+
+No RH20 run reaches the test_2 4% reference (`Δa* = -5.15`).  Run 5 x2 is the
+closest but remains around the test_2 3% reference (`Δa* = -3.97`).
+
+Run 5 x2 and its normal-speed recording return to the test_2-equivalent 0%
+state at the recovery endpoint.  Runs 2, 3, and 4 retain a small positive a*
+offset and match the 0--1% optical band, which is suitable illumination-domain
+augmentation but should not redefine the 1% reaction boundary.
+
+Selective use for the next model is therefore:
+
+- strong exact 4%: test_2 only;
+- weak 3%: run 4 and run 5 x2;
+- weak 2--3% ordering: run 3 and run 5 normal;
+- weak 1--2% ordering: run 2;
+- strong experimental-condition 0% anchors: final recovery endpoints of all
+  runs, with the optical 0--1% band retained for display uncertainty.
