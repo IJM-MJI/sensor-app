@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Low-response recovery v6</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · Direct low-response recovery v7</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,7 +216,7 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.25-low-response-recovery-v6';
+var APP_VERSION='2026.08.25-direct-low-response-recovery-v7';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -602,8 +602,15 @@ doClassify=function(f){
   // probability is also low, recover the physically consistent initial state
   // instead of asking for an endless retake. H2/simultaneous candidates are
   // intentionally excluded by the h2p guard.
-  if(uncertain&&rhEndpointShadow&&rhEndpointShadow.brightnessOnly&&h2p<.25){
+  var lowResponseRecovered=false;
+  var shadowVector=rhEndpointShadow&&rhEndpointShadow.vector;
+  var shadowLimit=window.SENSOR_RH_PLACE2_ENDPOINT_MODEL&&
+    SENSOR_RH_PLACE2_ENDPOINT_MODEL.low_chroma_abs_ab_max;
+  var directLowChroma=shadowVector&&isFinite(shadowLimit)&&
+    Math.abs(shadowVector[1])<=shadowLimit&&Math.abs(shadowVector[2])<=shadowLimit;
+  if(uncertain&&directLowChroma&&h2p<.25){
     uncertain=false;state='initial';h2=false;rh=false;rhSimPending=false;
+    lowResponseRecovered=true;
   }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
@@ -625,6 +632,7 @@ doClassify=function(f){
   }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,rhSimPending:rhSimPending,
+    lowResponseRecovered:lowResponseRecovered,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
@@ -657,7 +665,7 @@ function showResult(r){
     +(r.h2Quant&&r.h2Quant.raw!=null?' rawH2='+r.h2Quant.raw.toFixed(2):'')
     +(r.rhQuant&&r.rhQuant.raw!=null?' rawRH='+r.rhQuant.raw.toFixed(1):'')+' '
     +(r.rhQuant&&r.rhQuant.distance!=null?' rhD='+r.rhQuant.distance.toFixed(2):'')+' '
-    +shadowVals+' '
+    +shadowVals+(r.lowResponseRecovered?' lowGuard=1':'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
   document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>';

@@ -117,3 +117,9 @@ low-confidence label as `Uncertain / Retake`. Version v6 also recovers
 `Initial / Low Response` when the guard is active and combined H2 probability
 is below 0.25. This does not post-process confident four-state predictions and
 cannot suppress an H2/simultaneous candidate above that threshold.
+
+The v6 app repeat confirmed the numeric 20--30 range at 1.5, 2, and 2.5 s, but
+the indirect `brightnessOnly` flag did not recover the state at 1.5/2 s.
+Version v7 evaluates the returned shadow vector directly with the same a*/b*
+limit and exposes `lowGuard=1` when recovery executes. This makes the state
+guard independently observable in the screenshot diagnostics.
