@@ -36,3 +36,23 @@ Applying `rawH2 <= 0` to every low-confidence held-out frame would recover many
 RH-only cases, but it would also convert one nominal H2 4% frame from
 `H2_only_test_2` at 88 s.  The candidate is therefore not deployed without the
 additional RH low-chroma condition and the app-domain endpoint comparison.
+
+## Low-H2 state-label A/B
+
+The app-domain test showed that the nominal 1% endpoint had `rawH2=0.25` but
+was labelled Initial.  Inspection of the state-training policy found that H2
+1--2% ramp frames had no `h2_present` target; only the earlier stable 3--4%
+anchors supervised H2 presence.
+
+A leave-one-experiment-group-out A/B added H2-only rows only after their
+continuous nominal ramp reached 1%.  Relative to the same 320-tree model:
+
+| Policy | Accuracy | Balanced accuracy | H2-only recall | RH-only accuracy |
+|---|---:|---:|---:|---:|
+| Stable 3--4% anchors | 71.9% | 70.1% | 73.5% | 79.1% |
+| Add verified >=1% ramp endpoints | 73.1% | 70.6% | 77.5% | 80.0% |
+
+The >=1% policy improves H2-only recall without reducing the RH-only result and
+is therefore used for the next exported four-state model.  The RH-only
+low-response post-processing threshold remains disabled until this retrained
+model is repeated on the supplied app frames.

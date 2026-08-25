@@ -90,6 +90,16 @@ def response_labels(rows: list[dict[str, object]]) -> None:
         kind, state = str(row["kind"]), str(row.get("state"))
         h2_value, rh_value = row.get("h2_value"), row.get("rh_value")
         row["rh_present"] = None
+        # The concentration timelines are ramp endpoints.  Earlier state
+        # training kept only the stable 3--4% anchors, which left verified
+        # H2-only 1--2% endpoint/late-ramp frames without a state target and
+        # caused a real 1% app frame to be classified as Initial.  Once the
+        # nominal ramp has reached 1%, the exposure type and flame response are
+        # sufficient H2-presence supervision.  Existing explicit 0/1 labels
+        # (including recovery) always take precedence.
+        if (kind == "h2_only" and row.get("h2_present") is None
+                and h2_value is not None and float(h2_value) >= 1.0):
+            row["h2_present"] = 1
         if row.get("h2_present") is None and kind == "simultaneous":
             phase = str(row.get("phase", ""))
             if phase == "reaction" and h2_value is not None and float(h2_value) >= 3:
