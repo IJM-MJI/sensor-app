@@ -42,3 +42,37 @@ profiles (or obtain another trustworthy daylight H2 run) and evaluate the
 profile selector independently.  A model fitted and tested only on `test_3`
 may be useful as an explicitly labelled reference-matching mode, but it is not
 an independent held-out validation.
+
+## Sample-plane perspective audit
+
+The existing research quadrilateral detector and perspective warp were tested
+on the 2 s calibration frame of all five cropped H2 videos.  They were not safe
+to port into the browser:
+
+- `test_2` and `test_3` returned a small square around the flame rather than the
+  complete sensor card;
+- `test` and run 4 returned a near-full-frame strip;
+- run 5 returned a small metal/reflection region.
+
+The card boundary is partly hidden by chamber hardware and has too little local
+contrast for an unconstrained contour detector.  Applying these homographies
+would therefore move the flame mask to a physically incorrect area.
+
+With calibration-locked geometry, the reliable runs also retained different
+colour paths.  `test` primarily moved toward lower flame b*, `test_2` primarily
+moved toward lower a*, while `test_3` used b* at the first stage and a* at later
+stages.  This confirms that perspective correction alone cannot make the three
+runs share one linear concentration axis.
+
+A nonlinear gradient-boosting candidate gave the most even complete-video
+holdout result across the three reliable runs: exact 0.486, video-macro exact
+0.499, within-one-stage 0.951, and MAE 0.574 stages.  Collapsing predictions to
+`0--1 / 2--3 / 4` ranges produced 0.597 exact range accuracy (`test_2` 0.765,
+`test_3` 0.500, `test` 0.750).  This is a useful direction but is not accurate
+enough to replace the deployed model.
+
+The next defensible geometry experiment needs either tightly cropped sensor-card
+videos with the four card edges visible, or four calibration corners supplied
+once per recording.  The next defensible daylight concentration validation also
+needs a second trustworthy daylight H2 ramp; run 5 cannot provide exact 4%
+supervision because its response was independently judged to stop near 2--3%.
