@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.24 · Place-2 RH endpoint v1</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · Response3 diagnostic v2</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -213,10 +213,10 @@ body{
 
 <script src="sensor-model.js?v=20260813-3"></script>
 <script src="sensor-concentration-model.js?v=20260819-1"></script>
-<script src="sensor-rh-place2-model.js?v=20260824-1"></script>
+<script src="sensor-rh-place2-model.js?v=20260825-1"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.24-place2-rh-endpoint-v1';
+var APP_VERSION='2026.08.25-response3-diagnostic-v2';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -230,6 +230,7 @@ var BL=JSON.parse(JSON.stringify(BL_DEFAULT));
 var calibrated=false;
 var calMode=false;
 var dropRegistration=null;
+var circleRegistration=null;
 var displayEnhanced=false;
 
 function setDisplayEnhancement(enabled){
@@ -252,6 +253,9 @@ function saveCal(feat){
   dropRegistration=feat._dropRegistration?{
     x:feat._dropRegistration.x,y:feat._dropRegistration.y,angle:feat._dropRegistration.angle
   }:null;
+  circleRegistration=feat._circleRegistration?{
+    cx:feat._circleRegistration.cx,cy:feat._circleRegistration.cy,r:feat._circleRegistration.r
+  }:null;
   calibrated=true;
   updateCalUI();
 }
@@ -260,6 +264,7 @@ function clearCal(){
   BL=JSON.parse(JSON.stringify(BL_DEFAULT));
   calibrated=false;
   dropRegistration=null;
+  circleRegistration=null;
   manualROI=null;
   updateCalUI();
 
@@ -549,7 +554,7 @@ function place2EndpointRhBand(model,f){
   if(best<0)return null;
   var level=model.classes[best],levelIndex=model.levels.indexOf(level);
   return{raw:level,index:levelIndex,outside:false,text:model.display_levels[levelIndex],
-    profile:model.profile,distance:bestDistance,margin:secondDistance-bestDistance};
+    profile:model.profile,distance:bestDistance,margin:secondDistance-bestDistance,vector:values};
 }
 doClassify=function(f){
   var sv=stateFeatures(SENSOR_STATE_MODEL,f);
@@ -564,12 +569,14 @@ doClassify=function(f){
   var rh=!uncertain&&(state==='H2O_only'||state==='simultaneous');
   var h2p=(stateProb.H2_only||0)+(stateProb.simultaneous||0);
   var rhp=(stateProb.H2O_only||0)+(stateProb.simultaneous||0);
-  var h2Quant=null,rhQuant=null,rhSimPending=state==='simultaneous';
+  var h2Quant=null,rhQuant=null,rhEndpointShadow=null,rhSimPending=state==='simultaneous';
+  if(calibrated&&window.SENSOR_RH_PLACE2_ENDPOINT_MODEL)
+    rhEndpointShadow=place2EndpointRhBand(SENSOR_RH_PLACE2_ENDPOINT_MODEL,f);
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
     if(!rhSimPending){
-      rhQuant=(state==='H2O_only'&&window.SENSOR_RH_PLACE2_ENDPOINT_MODEL)?
-        place2EndpointRhBand(SENSOR_RH_PLACE2_ENDPOINT_MODEL,f):
+      rhQuant=(state==='H2O_only'&&rhEndpointShadow)?
+        rhEndpointShadow:
         concentrationBand(SENSOR_CONCENTRATION_MODEL.models.rh,f);
     }
     // Keep the two numeric axes consistent with the selected physical state.
@@ -584,7 +591,7 @@ doClassify=function(f){
     }
   }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
-    h2Quant:h2Quant,rhQuant:rhQuant,rhSimPending:rhSimPending,
+    h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,rhSimPending:rhSimPending,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
@@ -609,11 +616,15 @@ function showResult(r){
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
   document.getElementById('sName').textContent=SN[r.state]||r.state;
   var cm={high:'High Confidence',medium:'Medium Confidence',low:'Low Confidence'};
+  var shadow=r.rhEndpointShadow;
+  var shadowVals=shadow?(' rhShadow='+shadow.text+' d='+shadow.distance.toFixed(2)+
+    (shadow.vector?' v=('+shadow.vector.map(function(x){return x.toFixed(1);}).join(',')+')':'')):' ';
   var vals=(r.h2p===undefined?'':'pH2='+r.h2p+' pRH='+r.rhp+
     (r.stateConfidence===undefined?'':' pState='+r.stateConfidence+' gap='+r.stateGap)+'  ')
     +(r.h2Quant&&r.h2Quant.raw!=null?' rawH2='+r.h2Quant.raw.toFixed(2):'')
     +(r.rhQuant&&r.rhQuant.raw!=null?' rawRH='+r.rhQuant.raw.toFixed(1):'')+' '
     +(r.rhQuant&&r.rhQuant.distance!=null?' rhD='+r.rhQuant.distance.toFixed(2):'')+' '
+    +shadowVals+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
   document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>';
@@ -626,8 +637,12 @@ function showResult(r){
 
   var rhE=document.getElementById('rhVal');
   if(r.state==='no_sensor'){rhE.textContent='-';rhE.style.color='#999';}
-  else if(r.state==='undecided'){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(!calibrated){rhE.textContent='Calibrate first';rhE.style.color='#ff9800';}
+  else if(r.rhEndpointShadow&&r.state!=='H2O_only'){
+    rhE.textContent=r.rhEndpointShadow.text+'% RH (endpoint shadow only; state='+(SN[r.state]||r.state)+')';
+    rhE.style.color='#ff9800';
+  }
+  else if(r.state==='undecided'){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhSimPending){rhE.textContent='Simultaneous RH correction pending — number hidden';rhE.style.color='#ff9800';}
   else if(!r.rhQuant){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhQuant.outside){rhE.textContent='Outside trained range / Retake';rhE.style.color='#ef5350';}
@@ -976,9 +991,21 @@ function detectAndClassify(src){
       var coverage=cnt>0?chromaCnt/cnt:0;
       var span=maxWarmY>=minWarmY?(maxWarmY-minWarmY)/Math.max(r,1):0;
       var score=(cy>h*0.50)?0:(coverage+0.05*Math.min(span,1.8))*Math.sqrt(r/Math.min(h,w));
+      // Saved frames from one run must not jump between the chamber window and
+      // a smaller sample/metal circle. After calibration, strongly prefer the
+      // Hough candidate nearest to the calibrated normalized circle while
+      // retaining the colour score for small camera shifts.
+      if(calibrated&&circleRegistration){
+        var anchorDx=(cx/w-circleRegistration.cx)/.08;
+        var anchorDy=(cy/h-circleRegistration.cy)/.08;
+        var anchorDr=(r/Math.min(h,w)-circleRegistration.r)/.08;
+        var anchorError=anchorDx*anchorDx+anchorDy*anchorDy+anchorDr*anchorDr;
+        score+=.35*Math.exp(-.5*anchorError);
+      }
       if(score>bScore){bScore=score;bBr=avg;bCx=cx;bCy=cy;bR=r;}
     }
     nCircles=circles.cols;
+    if(calibrated&&circleRegistration)roiSource='auto-anchor';
     circles.delete(); gray.delete(); selLab.delete();
 
     if(bBr<80)
@@ -1195,7 +1222,8 @@ function detectAndClassify(src){
     flame_chroma_p50:percentile(flameChroma,50),
     flame_chroma_p75:percentile(flameChroma,75),
     flame_chroma_p90:percentile(flameChroma,90),
-    _dropRegistration:activeRegistration
+    _dropRegistration:activeRegistration,
+    _circleRegistration:{cx:bCx/w,cy:bCy/h,r:bR/Math.min(h,w)}
   };
 
   var clf=doClassify(feat);

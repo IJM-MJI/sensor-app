@@ -385,3 +385,19 @@ visible app version were verified locally. The automated browser had no camera,
 so real/monitor-captured endpoint validation remains the next required step.
 The exact calibration frames, endpoints, expected ranges, repetitions, and
 acceptance rule are recorded in `PLACE2_RH_APP_TEST.md`.
+
+### First response3 app-domain test
+
+Seven screenshots corresponding to 2/3/5/7/11/25/28 s yielded state outputs
+no-sensor/simultaneous/simultaneous/H2-only/H2-only/uncertain/H2O-only. Thus
+only the 28 s sample reached the endpoint RH model, where it returned the
+expected 80--90 range but at a large nearest-prototype distance of 7.98. Circle
+centre/radius also changed substantially between loaded frames. This is an
+upstream state/ROI-domain failure, not yet an RH confusion result.
+
+Response3 diagnostic v2 anchors automatic circle selection to the calibration
+circle and exposes the RH endpoint prediction in shadow mode for every state,
+including uncertain and simultaneous. It reports the shadow range, distance,
+and corrected LAB vector without changing the independent four-state output or
+using the shadow result to override that state. The observed results and repeat
+protocol are recorded in `RESPONSE3_APP_TEST_2026-08-25.md`.
