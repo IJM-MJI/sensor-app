@@ -73,3 +73,21 @@ under `training/output/response3_roi_audit/`.
 For the next app repeat, first inspect the calibration overlay. Its red/yellow
 circle must enclose the central chamber window. If it is on metal, stop and
 send only that calibration screenshot; do not continue the endpoint sequence.
+
+## ROI-fix-v3 repeat
+
+With the lower-left reflection rejected, all eight requested endpoint images
+used a central chamber ROI. In endpoint order (2, 3, 5, 7, 11, 25, 28, 38 s),
+the shadow ranges were 40--50, 20--30, 60--70, 60--70, 60--70, 80--90,
+80--90, and 80--90. Against the supplied range targets this is 4/8 exact;
+the correct endpoints were 3, 11, 28, and 38 s.
+
+The remaining test exposed a geometry-domain mismatch rather than a justified
+new concentration boundary. The training cache uses one locked circle for all
+endpoints in a video. The app instead re-detected the circle on every image;
+the screenshots show selected `y=172--231` and `r=228--265`. That changes the
+normalized tight-droplet pixels between otherwise aligned images. Version v4
+therefore reuses the normalized calibration circle for the entire aligned run
+and adds an inner-aperture radius prior during the initial calibration. RH
+prototypes are deliberately unchanged until the fixed-geometry repeat shows
+which errors remain.

@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Response3 ROI fix v3</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · Calibrated ROI lock v4</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,7 +216,7 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-1"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.25-response3-roi-fix-v3';
+var APP_VERSION='2026.08.25-calibrated-roi-lock-v4';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -863,12 +863,11 @@ function finishCapture(){
       if(calMode&&r.state!=='no_sensor'){
         var f=r._raw;
         saveCal(f);
-        // Do not freeze the calibration circle position. Hand-held photos and
-        // saved video frames shift slightly, so each analysis frame must locate
-        // its own chamber. Manual ROI remains available only when explicitly set.
+        // Reuse this normalized geometry for the aligned run, matching the
+        // fixed-circle feature extraction used during model training.
         calMode=false;
         document.getElementById('calBtn').style.background='#2196F3';
-        document.getElementById('dbg').textContent='Calibrated! ROI will auto-align for each photo.';
+        document.getElementById('dbg').textContent='Calibrated! ROI geometry locked for this aligned run.';
         document.getElementById('procOverlay').classList.add('hidden');
         var co=document.getElementById('calOverlay');if(co) co.style.display='none';
         document.getElementById('calBar').style.display='';
@@ -936,6 +935,16 @@ function detectAndClassify(src){
     bR=Math.round(manualROI.rPct/100*Math.min(h,w));
     nCircles=1;
     roiSource='manual';
+  }else if(calibrated&&circleRegistration){
+    // Training extracts all endpoints in one run with a single locked chamber
+    // circle. Re-running Hough made response3 use a different coordinate system
+    // on every saved frame (observed y=172..231 and r=228..265), moving the
+    // tight droplet mask enough to change the predicted RH band.
+    bCx=Math.round(circleRegistration.cx*w);
+    bCy=Math.round(circleRegistration.cy*h);
+    bR=Math.round(circleRegistration.r*Math.min(h,w));
+    nCircles=1;nValidCircles=1;bBr=255;
+    roiSource='calibration-lock';
   }else{
     // Auto: HoughCircles
     var gray=new cv.Mat();
@@ -1003,22 +1012,14 @@ function detectAndClassify(src){
       var span=maxWarmY>=minWarmY?(maxWarmY-minWarmY)/Math.max(r,1):0;
       var centerDx=(nx-.50)/.30,centerDy=(ny-.43)/.30;
       var centerPrior=Math.exp(-.5*(centerDx*centerDx+centerDy*centerDy));
-      var score=(coverage+0.05*Math.min(span,1.8))*Math.sqrt(nr)+.08*centerPrior;
-      // Saved frames from one run must not jump between the chamber window and
-      // a smaller sample/metal circle. After calibration, strongly prefer the
-      // Hough candidate nearest to the calibrated normalized circle while
-      // retaining the colour score for small camera shifts.
-      if(calibrated&&circleRegistration){
-        var anchorDx=(cx/w-circleRegistration.cx)/.08;
-        var anchorDy=(cy/h-circleRegistration.cy)/.08;
-        var anchorDr=(r/Math.min(h,w)-circleRegistration.r)/.08;
-        var anchorError=anchorDx*anchorDx+anchorDy*anchorDy+anchorDr*anchorDr;
-        score+=.35*Math.exp(-.5*anchorError);
-      }
+      // Prefer the inner optical aperture (normally near 0.30 of the short
+      // side), rather than the much larger outer metal flange in tight crops.
+      var radiusPrior=Math.exp(-.5*Math.pow((nr-.30)/.14,2));
+      var score=(coverage+0.05*Math.min(span,1.8))*Math.sqrt(nr)+
+        .08*centerPrior+.10*radiusPrior;
       if(score>bScore){bScore=score;bBr=avg;bCx=cx;bCy=cy;bR=r;}
     }
     nCircles=circles.cols;
-    if(calibrated&&circleRegistration)roiSource='auto-anchor';
     circles.delete(); gray.delete(); selLab.delete();
 
     if(nValidCircles===0)
@@ -1286,7 +1287,9 @@ function drawDebugOverlay(r){
   dx.font='bold 14px sans-serif';
   dx.fillStyle='rgba(0,0,0,0.7)';
   dx.fillRect(4,4,220,130);
-  var src=g.roiSource==='manual'?'Manual ROI':'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central';
+  var src=g.roiSource==='manual'?'Manual ROI':
+    (g.roiSource==='calibration-lock'?'Calibration ROI locked':
+      'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central');
   dx.fillStyle='#fff';dx.fillText(src,10,20);
   dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness
     +(g.chromaScore===null?'':' chroma='+g.chromaScore+'%'),10,36);

@@ -65,7 +65,9 @@ def select(frame: np.ndarray, circles: list[tuple[int, int, int]]) -> tuple[int,
         span = (warm_y.max() - warm_y.min()) / max(radius, 1) if warm_y.size else 0
         nx, ny, nr = cx / w, cy / h, radius / base
         center_prior = np.exp(-.5 * (((nx - .50) / .30) ** 2 + ((ny - .43) / .30) ** 2))
-        score = (coverage + .05 * min(span, 1.8)) * np.sqrt(nr) + .08 * center_prior
+        radius_prior = np.exp(-.5 * ((nr - .30) / .14) ** 2)
+        score = ((coverage + .05 * min(span, 1.8)) * np.sqrt(nr) +
+                 .08 * center_prior + .10 * radius_prior)
         if best is None or score > best[0]:
             best = (float(score), circle)
     return None if best is None else best[1]
