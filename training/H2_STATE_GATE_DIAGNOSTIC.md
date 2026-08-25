@@ -76,3 +76,25 @@ The lower raw bound preserves the previously identified `rawH2=-7.06` gross
 H2 extrapolation as Uncertain instead of silently converting it to Initial.
 The rule does not affect the supplied H2 endpoint values or the response3
 2.5 s H2O-only result.
+
+## v10 repeat and v11 low-H2 consensus
+
+The RH-only correction behaved as intended: response3 1.5 and 2 s became
+Initial with `lowGuard=1`, while 2.5 s remained H2O-only.  On the H2 run, 15 s
+still had weak optical evidence (`rawH2=0.78`, `pH2x=0.28`), 17 s had a
+consistent flame response (`rawH2=1.61`, `pH2x=0.61`, combined `pH2=0.47`),
+and 19 s was already H2-only (`rawH2=1.78`).
+
+Version v11 promotes a weak Initial result to H2-only only when:
+
+- maximum four-state probability is below 0.50;
+- the RH endpoint vector remains low-chroma;
+- combined four-state H2 probability is at least 0.40;
+- independent H2 probability is at least 0.55;
+- `rawH2 >= 1.50`.
+
+The rule changes the supplied 17 s app-domain case.  In the 881-frame grouped
+held-out audit it promoted no Initial, H2O-only, or H2-only frame; consequently
+it introduces no measured false promotion but also cannot be claimed as a
+held-out accuracy improvement.  It remains an app-domain correction pending a
+repeat on an untouched H2-only run.

@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Optical H2 guard v10</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · Low-H2 optical consensus v11</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,7 +216,7 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260825-5"></script>
 <script>
-var APP_VERSION='2026.08.25-optical-h2-guard-v10';
+var APP_VERSION='2026.08.25-low-h2-optical-consensus-v11';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -632,6 +632,18 @@ doClassify=function(f){
     uncertain=false;state='initial';h2=false;rh=false;rhSimPending=false;
     lowResponseRecovered=true;
   }
+  // Conversely, a weak four-state Initial can lag behind a genuine low-H2
+  // flame response.  The test_2 17 s frame had mutually consistent evidence
+  // from the four-state H2 sum, the independent H2 expert, and the continuous
+  // flame model, while 13/15 s did not.  Require all three plus a low-RH
+  // droplet vector; never override H2O-only or a strong Initial prediction.
+  var lowH2Promoted=false;
+  if(!uncertain&&state==='initial'&&maxProb<.50&&directLowChroma&&
+      h2p>=.40&&h2Expertp!=null&&h2Expertp>=.55&&
+      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=1.50){
+    state='H2_only';h2=true;rh=false;rhSimPending=false;
+    lowH2Promoted=true;
+  }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
     if(!rhSimPending){
@@ -653,7 +665,7 @@ doClassify=function(f){
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,rhSimPending:rhSimPending,
     h2Diagnostic:h2Diagnostic,h2Expertp:h2Expertp,
-    lowResponseRecovered:lowResponseRecovered,
+    lowResponseRecovered:lowResponseRecovered,lowH2Promoted:lowH2Promoted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
@@ -687,7 +699,8 @@ function showResult(r){
     +(r.h2Diagnostic&&r.h2Diagnostic.raw!=null?' rawH2='+r.h2Diagnostic.raw.toFixed(2):'')
     +(r.rhQuant&&r.rhQuant.raw!=null?' rawRH='+r.rhQuant.raw.toFixed(1):'')+' '
     +(r.rhQuant&&r.rhQuant.distance!=null?' rhD='+r.rhQuant.distance.toFixed(2):'')+' '
-    +shadowVals+(r.lowResponseRecovered?' lowGuard=1':'')+' '
+    +shadowVals+(r.lowResponseRecovered?' lowGuard=1':'')+
+    (r.lowH2Promoted?' h2Promote=1':'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
   document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>';
