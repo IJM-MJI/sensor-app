@@ -111,3 +111,9 @@ instead applies a narrow brightness-only guard: when both absolute relative
 middle/high app vectors or middle/high stored prototypes meet this condition.
 It corrects response3 1.5, 2, and 2.5 s while preserving the tested response3
 and response6 middle/high predictions.
+
+The concentration guard alone would leave the independent four-state forest's
+low-confidence label as `Uncertain / Retake`. Version v6 also recovers
+`Initial / Low Response` when the guard is active and combined H2 probability
+is below 0.25. This does not post-process confident four-state predictions and
+cannot suppress an H2/simultaneous candidate above that threshold.

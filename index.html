@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Low-chroma guard v5</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · Low-response recovery v6</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,7 +216,7 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.25-low-chroma-guard-v5';
+var APP_VERSION='2026.08.25-low-response-recovery-v6';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -597,6 +597,14 @@ doClassify=function(f){
   var h2Quant=null,rhQuant=null,rhEndpointShadow=null,rhSimPending=state==='simultaneous';
   if(calibrated&&window.SENSOR_RH_PLACE2_ENDPOINT_MODEL)
     rhEndpointShadow=place2EndpointRhBand(SENSOR_RH_PLACE2_ENDPOINT_MODEL,f);
+  // A low-RH monitor frame can be darker than calibration while showing no
+  // chromatic gas response. If the four-class forest is uncertain and the H2
+  // probability is also low, recover the physically consistent initial state
+  // instead of asking for an endless retake. H2/simultaneous candidates are
+  // intentionally excluded by the h2p guard.
+  if(uncertain&&rhEndpointShadow&&rhEndpointShadow.brightnessOnly&&h2p<.25){
+    uncertain=false;state='initial';h2=false;rh=false;rhSimPending=false;
+  }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
     if(!rhSimPending){
