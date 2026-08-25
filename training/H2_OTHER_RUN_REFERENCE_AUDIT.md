@@ -64,3 +64,22 @@ state as test_2.
 
 Before deployment, implement the same calibration-locked flame-pixel mask in
 the browser extractor and verify a new candidate without sacrificing 3% recall.
+
+## RH20 run 3 maximum check
+
+`1_90_RH20_3_x2_cropped.mp4` was checked separately using its stated 0--60 s
+reaction and 60--97 s recovery.  Because reaction begins at the first frame,
+the fixed flame mask and colour baseline were taken at 0 s.  The 50--60 s late
+reaction remained closest to the test_2 2% optical centroid; interpolation of
+the dominant green-channel change places it roughly between 2% and 3%.
+
+| Optical reference/state | Calibration-relative flame Δa* |
+|---|---:|
+| test_2 2% | -0.94 |
+| test_2 3% | -3.97 |
+| test_2 4% | -5.15 |
+| RH20 run 3, 50--60 s | -1.58 to -2.22 |
+
+The run therefore does **not** supply a test_2-equivalent 4% example.  It is
+useful as weak 2--3% augmentation and as a complete reaction/recovery state run,
+but it must not supervise the exact 4% class.
