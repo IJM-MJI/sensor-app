@@ -867,6 +867,8 @@ def main():
                         help="treat user-verified run 4/5 late response as weak 2-3%")
     parser.add_argument("--h2-partial-response-weight", type=float, default=.002,
                         help="training weight for verified 2-3% partial-response rows")
+    parser.add_argument("--h2-reliable-runs-only", action="store_true",
+                        help="exclude user-verified gas-shortage runs 4/5 from exact H2 quantitation")
     args = parser.parse_args()
     H2_FEATURE_PROFILE = args.h2_feature_profile
     reviewed_stages = tuple(int(value.strip()) for value in args.rh20_reviewed_stages.split(",")
@@ -889,6 +891,12 @@ def main():
         else:
             rows = [row for row in rows if str(row["video"]) not in original_rh20]
     rows.extend(augment_rows)
+    if args.h2_reliable_runs_only:
+        unreliable_h2 = {"1_90_H2_only_4.mp4", "1_90_H2_only_5.mp4"}
+        for row in rows:
+            if (row.get("kind") == "h2_only"
+                    and str(row.get("video")) in unreliable_h2):
+                row["exclude_exact_h2"] = True
     add_stability(rows)
     assign_h2_ramp_targets(rows)
     apply_h2_endpoint_training_profile(rows, args.h2_endpoint_training_profile)
@@ -914,7 +922,8 @@ def main():
                          if "analysis_stage" in row and (
                              row.get("analysis_phase") == "reaction"
                              or (row.get("weak_supervision")
-                                 and row.get("analysis_phase") == "recovered"))]
+                                 and row.get("analysis_phase") == "recovered"))
+                         and not row.get("exclude_exact_h2")]
         paths[task] = colour_path([row for row in task_rows if not row.get("weak_supervision")], config)
         models, predictions, within_run_models, within_run_predictions = {}, {}, {}, {}
         for name, estimator in candidates().items():

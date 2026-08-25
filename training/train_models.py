@@ -933,6 +933,14 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
         track = centered_crop_circle_track(cap, duration)
     else:
         track = circle_track(cap, duration)
+    if clip.kind == "h2_only":
+        # The browser locks the chamber geometry from the calibration photo for
+        # the rest of a run.  H2 quantitation must use the same geometry; the
+        # earlier periodically re-detected track changed radius by tens of
+        # pixels in daylight runs and let ROI motion masquerade as gas colour.
+        calibration_time = min(2.0, max(0.0, duration - 0.2))
+        calibration_circle = min(track, key=lambda item: abs(item[0] - calibration_time))[1]
+        track = [(0.0, calibration_circle), (duration, calibration_circle)]
     # All user-timed 90-degree recordings were visually verified with the flame
     # above the droplet. Semantic orientation must never be inferred from color
     # area because a reacted droplet can be larger/more chromatic than the flame.
@@ -1329,6 +1337,8 @@ def main() -> None:
                                       centered_crop=True)
             source_tag = ".cropped-v4-centered-smooth.fixed-boundary-v2" \
                 if source_name == cropped_name else ".fixed-boundary-v2"
+            if clip.kind == "h2_only":
+                source_tag += ".calibration-circle-lock-v1"
             if args.registered_drop_template:
                 source_tag += ".rd-v2"
             cache_identity = source_name + source_tag + (f".{clip.cache_tag}" if clip.cache_tag else "")
