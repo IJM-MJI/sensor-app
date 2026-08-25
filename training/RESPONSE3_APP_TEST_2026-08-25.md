@@ -91,3 +91,23 @@ therefore reuses the normalized calibration circle for the entire aligned run
 and adds an inner-aperture radius prior during the initial calibration. RH
 prototypes are deliberately unchanged until the fixed-geometry repeat shows
 which errors remain.
+
+## Fixed-geometry app-domain follow-up
+
+The fixed ROI improved response3 from 4/8 to 6/8. Additional frames showed:
+
+| Time | observed relative LAB vector | shadow range |
+|---:|---|---|
+| 1.5 s | `(-4.4, 1, 0)` | 40--50 (wrong) |
+| 2.5 s | `(-2.8, 1, 0)` | 40--50 (wrong) |
+| 6.0 s | `(-5.7, 3, 3)` | 40--50 (correct) |
+| 6.5 s | `(-4.8, 3, 2)` | 40--50 (correct) |
+
+The early errors contain lightness change but essentially no chromatic change.
+Reducing the global L* weight was rejected because a 0.5 weight changed the
+otherwise-correct response6 18 s result from 60--70 to 80--90. Version v5
+instead applies a narrow brightness-only guard: when both absolute relative
+`a*` and `b*` are at most 1.25, the range is 20--30. None of the observed
+middle/high app vectors or middle/high stored prototypes meet this condition.
+It corrects response3 1.5, 2, and 2.5 s while preserving the tested response3
+and response6 middle/high predictions.

@@ -8,6 +8,7 @@ window.SENSOR_RH_PLACE2_ENDPOINT_MODEL={
   "classes":[25,25,45,45,65,65,85,85,25,25,45,45,65,65,85,85],
   "levels":[25,45,65,85],
   "display_levels":["20–30","40–50","60–70","80–90"],
+  "low_chroma_abs_ab_max":1.25,
   "scaler_mean":[-7.099122133134987,3.6875,-0.5],
   "scaler_scale":[5.737250455424666,3.2349410736518833,4.366062299143245],
   "prototypes":[
@@ -25,5 +26,6 @@ window.SENSOR_RH_PLACE2_ENDPOINT_MODEL={
     "rh-response-3","rh-response-3","rh-response-3","rh-response-3",
     "rh-response-3","rh-response-3","rh-response-3","rh-response-3"],
   "response6_70_time_seconds":16.67,
+  "app_validation_response6_60_70_seconds":[17.0,18.0],
   "scope":"H2O-only, full-response endpoint photographs"
 };

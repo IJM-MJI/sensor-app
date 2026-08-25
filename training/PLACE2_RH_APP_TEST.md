@@ -20,7 +20,7 @@ Video: `1_90_H2O_only_3(response).mp4`
 
 - Calibration: 0.5 s (RH20 condition)
 - 2 s, 3 s: expected 20--30% RH
-- 5 s, 7 s: expected 40--50% RH
+- 5 s, 6.5 s: expected 40--50% RH
 - 11 s, 25 s: expected 60--70% RH
 - 28 s, 38 s: expected 80--90% RH
 
@@ -31,11 +31,14 @@ Video: `1_90_H2O_only_6(response).mp4`
 - Calibration: 2 s (RH20 condition)
 - 7 s, 10 s: expected 20--30% RH
 - 13 s, 14 s: expected 40--50% RH
-- 16 s, 16.67 s: expected 60--70% RH
-- 20 s, 32 s: expected 80--90% RH
+- 17 s, 18 s: expected 60--70% RH
+- 19 s, 32 s: expected 80--90% RH
 
-The 16.67 s response-6 point replaces the original 18 s 70% endpoint only for
-this experimental optical profile. Response 3 retains its supplied timeline.
+The app-domain sweep placed the response-6 60--70 optical band at 17--18 s and
+the 80--90 transition at 19 s, so app validation no longer uses 16.67 s. The
+current prototype file retains its 16.67 s provenance until an independent
+physical-sample run authorizes retraining. Response-3 7 s is the first frame
+of the following ramp; 6.5 s is used as the transition-safe 40--50 range anchor.
 
 ## Acceptance rule
 

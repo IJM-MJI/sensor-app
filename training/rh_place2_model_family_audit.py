@@ -108,6 +108,7 @@ def main():
         "classes": truth.astype(float).tolist(),
         "levels": [25.0, 45.0, 65.0, 85.0],
         "display_levels": ["20–30", "40–50", "60–70", "80–90"],
+        "low_chroma_abs_ab_max": 1.25,
         "scaler_mean": scaler.mean_.astype(float).tolist(),
         "scaler_scale": scaler.scale_.astype(float).tolist(),
         "prototypes": matrices["background_control"].astype(float).tolist(),

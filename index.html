@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · Calibrated ROI lock v4</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.25 · Low-chroma guard v5</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -213,10 +213,10 @@ body{
 
 <script src="sensor-model.js?v=20260813-3"></script>
 <script src="sensor-concentration-model.js?v=20260819-1"></script>
-<script src="sensor-rh-place2-model.js?v=20260825-1"></script>
+<script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260813-4"></script>
 <script>
-var APP_VERSION='2026.08.25-calibrated-roi-lock-v4';
+var APP_VERSION='2026.08.25-low-chroma-guard-v5';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -540,6 +540,13 @@ function place2EndpointRhBand(model,f){
     if(!isFinite(f[drop])||!isFinite(f[substrate])||!isFinite(BL[drop])||!isFinite(BL[substrate]))return null;
     values.push((f[drop]-f[substrate])-(BL[drop]-BL[substrate]));
   }
+  // Monitor exposure/brightness drift made response3 RH20 frames darker by
+  // up to 8.8 L* without a real colour response (observed a*=0..1, b*=0).
+  // Do not let lightness alone manufacture a 40--50% reading. This guard is
+  // deliberately narrower than every observed middle/high colour response.
+  var lowChromaLimit=model.low_chroma_abs_ab_max;
+  var brightnessOnly=isFinite(lowChromaLimit)&&
+    Math.abs(values[1])<=lowChromaLimit&&Math.abs(values[2])<=lowChromaLimit;
   var best=-1,bestDistance=Infinity,secondDistance=Infinity;
   for(var i=0;i<model.prototypes.length;i++){
     var distance=0;
@@ -552,9 +559,27 @@ function place2EndpointRhBand(model,f){
     else if(distance<secondDistance)secondDistance=distance;
   }
   if(best<0)return null;
-  var level=model.classes[best],levelIndex=model.levels.indexOf(level);
+  var level=model.classes[best];
+  if(brightnessOnly){
+    level=model.levels[0];
+    // Report distance to the nearest low-range prototype, not the prototype
+    // overruled because it matched only in lightness.
+    bestDistance=Infinity;secondDistance=Infinity;
+    for(var i=0;i<model.prototypes.length;i++){
+      var distance=0;
+      for(var j=0;j<values.length;j++){
+        var delta=(values[j]-model.prototypes[i][j])/Math.max(model.scaler_scale[j],1e-9);
+        distance+=delta*delta;
+      }
+      distance=Math.sqrt(distance);
+      if(model.classes[i]===level)bestDistance=Math.min(bestDistance,distance);
+      else secondDistance=Math.min(secondDistance,distance);
+    }
+  }
+  var levelIndex=model.levels.indexOf(level);
   return{raw:level,index:levelIndex,outside:false,text:model.display_levels[levelIndex],
-    profile:model.profile,distance:bestDistance,margin:secondDistance-bestDistance,vector:values};
+    profile:model.profile,distance:bestDistance,margin:secondDistance-bestDistance,vector:values,
+    brightnessOnly:brightnessOnly};
 }
 doClassify=function(f){
   var sv=stateFeatures(SENSOR_STATE_MODEL,f);
