@@ -82,7 +82,7 @@ The rule does not affect the supplied H2 endpoint values or the response3
 The RH-only correction behaved as intended: response3 1.5 and 2 s became
 Initial with `lowGuard=1`, while 2.5 s remained H2O-only.  On the H2 run, 15 s
 still had weak optical evidence (`rawH2=0.78`, `pH2x=0.28`), 17 s had a
-consistent flame response (`rawH2=1.61`, `pH2x=0.61`, combined `pH2=0.47`),
+partial flame response (`rawH2=1.01`, `pH2x=0.61`, combined `pH2=0.47`),
 and 19 s was already H2-only (`rawH2=1.78`).
 
 Version v11 promotes a weak Initial result to H2-only only when:
@@ -93,11 +93,10 @@ Version v11 promotes a weak Initial result to H2-only only when:
 - independent H2 probability is at least 0.55;
 - `rawH2 >= 1.50`.
 
-The rule changes the supplied 17 s app-domain case.  In the 881-frame grouped
-held-out audit it promoted no Initial, H2O-only, or H2-only frame; consequently
-it introduces no measured false promotion but also cannot be claimed as a
-held-out accuracy improvement.  It remains an app-domain correction pending a
-repeat on an untouched H2-only run.
+The supplied 17 s case does not pass the raw-H2 threshold and therefore remains
+Initial/Low Response.  In the 881-frame grouped held-out audit the rule promoted
+no Initial, H2O-only, or H2-only frame; consequently it introduces no measured
+false promotion but also cannot be claimed as a held-out accuracy improvement.
 
 ## v11 repeat and v12 0--1% resolution band
 
@@ -112,17 +111,17 @@ The 15 s frame (`rawH2=0.78`) cannot defensibly be forced to either exact 0% or
 exact 1%.  For an accepted Initial/Low Response state with a 20--30% RH shadow,
 v12 displays `0--1% H2` when `0.50 <= rawH2 < 1.50`.  This is a resolution
 interval containing zero, not a newly claimed exact concentration class.  The
-17 s frame (`rawH2=1.61`) remains outside this interval and is handled by the
-three-model H2 consensus promotion; 19 s remains an ordinary H2-only result.
+17 s frame (`rawH2=1.01`) is also correctly represented by this interval;
+19 s remains an ordinary H2-only result.
 
 ## v12 repeat and v13 execution fix
 
 The 0--1% resolution interval worked at 15 and 17 s, and 19 s remained H2-only.
-However, 17 s was not promoted even though the displayed values satisfied every
-H2 consensus threshold.  Code inspection isolated the remaining blocker to an
-exact comparison against the RH endpoint display string.  That check was
-redundant: the promotion already requires agreement from the four-state H2 sum,
-the independent H2 model, the continuous flame model, and a weak Initial state.
+The 17 s result was initially misread as `rawH2=1.61`; enlargement of the source
+screenshot confirmed that the displayed value is `rawH2=1.01`.  It therefore
+belongs in the 0--1% resolution interval and must not be promoted to H2-only.
+The RH endpoint display-string check removed in v13 was redundant, but removing
+it does not alter this result because the raw-H2 threshold still applies.
 
 The 881-frame grouped audit had already evaluated this consensus without the RH
 string condition and produced zero promotions of Initial, H2O-only, or H2-only
