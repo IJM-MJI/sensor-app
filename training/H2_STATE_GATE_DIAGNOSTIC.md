@@ -114,3 +114,17 @@ v12 displays `0--1% H2` when `0.50 <= rawH2 < 1.50`.  This is a resolution
 interval containing zero, not a newly claimed exact concentration class.  The
 17 s frame (`rawH2=1.61`) remains outside this interval and is handled by the
 three-model H2 consensus promotion; 19 s remains an ordinary H2-only result.
+
+## v12 repeat and v13 execution fix
+
+The 0--1% resolution interval worked at 15 and 17 s, and 19 s remained H2-only.
+However, 17 s was not promoted even though the displayed values satisfied every
+H2 consensus threshold.  Code inspection isolated the remaining blocker to an
+exact comparison against the RH endpoint display string.  That check was
+redundant: the promotion already requires agreement from the four-state H2 sum,
+the independent H2 model, the continuous flame model, and a weak Initial state.
+
+The 881-frame grouped audit had already evaluated this consensus without the RH
+string condition and produced zero promotions of Initial, H2O-only, or H2-only
+frames.  Version v13 therefore removes only that redundant string comparison;
+the 0--1% interval and all numeric H2 thresholds remain unchanged.
