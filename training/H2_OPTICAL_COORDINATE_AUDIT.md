@@ -7,14 +7,19 @@ moderately saturated sensing pixels.
 
 | Photo | Median RGB | HSV hue | OpenCV Lab | Visual interpretation |
 |---|---|---:|---|---|
-| 1 | 146, 144, 103 | 58° | 150, 123, 149 | muted olive/yellow; initial or very low response |
-| 2 | 143, 143, 98 | 58° | 149, 121, 150 | slightly greener yellow; higher response than photo 1 |
+| 1 | 146, 144, 103 | 58° | 150, 123, 149 | user-confirmed Initial |
+| 2 | 143, 143, 98 | 58° | 149, 121, 150 | user-confirmed H2 2-3% |
 
 OpenCV Lab a*=123 and 121 correspond to centred a* values near -5 and -7.
 The second flame is therefore measurably farther in the green direction, but
-the shift is small. Without a matched calibration frame for each photo, an
-exact 2%/3% assignment is not defensible. The most plausible coarse states are
-initial/0–1% for photo 1 and low H2 response around 1–2% for photo 2.
+the shift is small. The earlier visual estimate of 1-2% for photograph 2 was
+incorrect. The user-confirmed assignment shows that a small green shift can
+already mean H2 2-3%; a dramatic visible change must not be required.
+
+In the current `test_2` trajectory, the approximate photo-pair change in a*
+lies between the learned optical-2 and optical-3 anchors. This supports using
+the corrected pair as an external coarse-state constraint, while still not
+claiming an exact 2% versus 3% assignment from the photographs alone.
 
 ## Model tested
 
