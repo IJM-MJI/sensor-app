@@ -36,27 +36,30 @@ best video-macro result was shrinkage LDA.
 
 | Metric | Result |
 |---|---:|
-| Frame-weighted exact accuracy | 0.668 |
-| Video-macro exact accuracy | 0.676 |
-| Mean absolute error | 0.467 percentage-point labels |
-| 0--1 recall | 0.837 |
-| 2 recall | 0.624 |
-| 3 recall | 0.361 |
-| 4 recall | 0.720 |
-| Actual 3 predicted as 4 | 0.089 |
+| Frame-weighted exact accuracy | 0.680 |
+| Video-macro exact accuracy | 0.693 |
+| Mean absolute error | 0.444 percentage-point labels |
+| 0--1 recall | 0.852 |
+| 2 recall | 0.663 |
+| 3 recall | 0.373 |
+| 4 recall | 0.709 |
+| Actual 3 predicted as 4 | 0.041 |
 
 Confusion matrix (rows=reference, columns=prediction):
 
 | | 0--1 | 2 | 3 | 4 |
 |---|---:|---:|---:|---:|
-| 0--1 | 226 | 43 | 0 | 1 |
-| 2 | 23 | 128 | 45 | 9 |
-| 3 | 1 | 92 | 61 | 15 |
-| 4 | 0 | 46 | 35 | 208 |
+| 0--1 | 230 | 39 | 0 | 1 |
+| 2 | 12 | 136 | 54 | 3 |
+| 3 | 5 | 94 | 63 | 7 |
+| 4 | 0 | 48 | 36 | 205 |
 
-The four-band definition avoids widespread 3-to-4 over-promotion, but it does
+The final comparison uses all eleven features common to every fixed flame mask:
+mean/median Lab and five within-flame chroma percentiles.  The percentiles
+improved the video-macro score from 0.676 to 0.693 and reduced 3-to-4 leakage
+from 0.089 to 0.041.  The four-band definition avoids widespread 3-to-4 over-promotion, but it does
 not meet the requested 0.85 recall per class. The central problem remains the
-2/3 boundary: 92 of 169 reference-3 frames are called 2. This is evidence that
+2/3 boundary: 94 of 169 reference-3 frames are called 2. This is evidence that
 merging 0 and 1 and renaming the common maximum cannot by itself make the
 intermediate optical states reproducible across runs.
 
@@ -64,11 +67,11 @@ intermediate optical states reproducible across runs.
 
 Do not deploy this model yet. Keep the four-band formulation as the preferred
 output structure, because it is more honest than the previous five exact
-classes, but first replace broad time windows with per-run flame trajectory
-landmarks. The next analysis should align each run by its calibration-to-maximum
-colour path and audit the candidate 2/3 transition frames visually. Only after
-that review should the 2/3 boundary be retrained and compared against this
-0.676 video-macro baseline.
+classes. Per-run landmark trimming and plateau reassignment were also tested
+and rejected (see `H2_CONSENSUS_LANDMARK_AUDIT.md`). The next model should use
+the absolute calibration-frame flame/background descriptors as domain context,
+in addition to the current response deltas, and must beat this 0.693
+video-macro baseline without reducing 2% or 4% recall.
 
 Artifacts:
 

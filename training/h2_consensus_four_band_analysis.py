@@ -114,19 +114,25 @@ def main() -> None:
     parser.add_argument("--sample-hz", type=float, default=2.0)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    cache = args.output / "labelled_fixed_mask_rows.npz"
+    # v2 also retains timestamps so later landmark/trajectory audits can trace
+    # every prediction back to a reviewable video frame.
+    cache = args.output / "labelled_fixed_mask_rows_v3.npz"
     if cache.exists():
         saved = np.load(cache, allow_pickle=False)
-        x, y, groups = saved["x"], saved["y"], saved["groups"]
+        x, y, groups, times = (saved["x"], saved["y"], saved["groups"],
+                               saved["times"])
         row_count = len(y)
     else:
         rows = extract_all(args.video_root, args.sample_hz)
-        # L*, a*, b* mean and median are available in every fixed-mask extractor.
-        x = np.asarray([row["x"][:6] for row in rows])
+        # Mean/median Lab plus five within-flame chroma percentiles are common
+        # to every fixed-mask extractor.  Percentiles preserve partial colour
+        # change that is hidden by a single ROI average.
+        x = np.asarray([row["x"][:11] for row in rows])
         y = np.asarray([row["y"] for row in rows])
         groups = np.asarray([row["run"] for row in rows])
+        times = np.asarray([row["time"] for row in rows])
         row_count = len(rows)
-        np.savez_compressed(cache, x=x, y=y, groups=groups)
+        np.savez_compressed(cache, x=x, y=y, groups=groups, times=times)
     models = {
         "logistic": make_pipeline(StandardScaler(), LogisticRegression(
             C=.2, max_iter=4000, class_weight="balanced", random_state=42)),
