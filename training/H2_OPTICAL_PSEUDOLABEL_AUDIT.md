@@ -75,6 +75,5 @@ while reducing 3% recall.
 
 Build a constrained 2-vs-3 specialist using only the trusted optical candidates,
 then test it video-held-out with a rule that may override the existing four-band
-model only when 3% recall is not reduced. Ambiguous 3% candidates should be
-exported as a compact review atlas for human confirmation before any production
-model change.
+model only when 3% recall is not reduced. This is an entirely automatic test;
+no user review or manual runtime decision is required.
