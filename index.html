@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.25 · H2 consensus execution fix v13</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.27 · Automatic H2 environment router v14</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -215,8 +215,9 @@ body{
 <script src="sensor-concentration-model.js?v=20260819-1"></script>
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260825-5"></script>
+<script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.25-h2-consensus-execution-fix-v13';
+var APP_VERSION='2026.08.27-automatic-h2-environment-router-v14';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -231,6 +232,8 @@ var calibrated=false;
 var calMode=false;
 var dropRegistration=null;
 var circleRegistration=null;
+var h2Environment=null;
+var h2EnvironmentScore=null;
 var displayEnhanced=false;
 
 function setDisplayEnhancement(enabled){
@@ -256,6 +259,8 @@ function saveCal(feat){
   circleRegistration=feat._circleRegistration?{
     cx:feat._circleRegistration.cx,cy:feat._circleRegistration.cy,r:feat._circleRegistration.r
   }:null;
+  h2Environment=feat._h2Environment||null;
+  h2EnvironmentScore=isFinite(feat._h2EnvironmentScore)?feat._h2EnvironmentScore:null;
   calibrated=true;
   updateCalUI();
 }
@@ -265,6 +270,8 @@ function clearCal(){
   calibrated=false;
   dropRegistration=null;
   circleRegistration=null;
+  h2Environment=null;
+  h2EnvironmentScore=null;
   manualROI=null;
   updateCalUI();
 
@@ -305,7 +312,7 @@ function updateCalUI(){
   var btn=document.getElementById('calBtn');
   var clr=document.getElementById('calClearBtn');
   if(calibrated){
-    st.textContent='Calibrated (top_a='+BL.top_a.toFixed(1)+')';
+    st.textContent='Calibrated (H2 environment '+(h2Environment||'?')+', top_a='+BL.top_a.toFixed(1)+')';
     st.className='cal-status active';
     btn.textContent='Re-calibrate';
     clr.classList.remove('hidden');
@@ -1008,8 +1015,69 @@ function processFrame(){
   return result;
 }
 
+// The H2 concentration model is environment-specific. Choose the environment
+// once, from the calibration photograph, using the same full-frame HSV
+// distribution that passed complete-video-held-out validation offline.
+function environmentHsvFeatures(src){
+  var bgr=new cv.Mat(),hsv=new cv.Mat();
+  cv.cvtColor(src,bgr,cv.COLOR_RGBA2BGR);
+  cv.cvtColor(bgr,hsv,cv.COLOR_BGR2HSV);
+  bgr.delete();
+  var x0=Math.floor(src.cols*.08),x1=Math.floor(src.cols*.92);
+  var y0=Math.floor(src.rows*.08),y1=Math.floor(src.rows*.92);
+  var hist=[new Array(256).fill(0),new Array(256).fill(0),new Array(256).fill(0)];
+  var sum=[0,0,0],sum2=[0,0,0],count=0,data=hsv.data,cols=hsv.cols;
+  for(var y=y0;y<y1;y++)for(var x=x0;x<x1;x++){
+    var at=(y*cols+x)*3;count++;
+    for(var channel=0;channel<3;channel++){
+      var value=data[at+channel];hist[channel][value]++;
+      sum[channel]+=value;sum2[channel]+=value*value;
+    }
+  }
+  hsv.delete();
+  function orderValue(channel,k){
+    var cumulative=0;
+    for(var value=0;value<256;value++){
+      cumulative+=hist[channel][value];if(cumulative>k)return value;
+    }
+    return 255;
+  }
+  function quantile(channel,p){
+    var at=(count-1)*p/100,lo=Math.floor(at),hi=Math.ceil(at);
+    var low=orderValue(channel,lo),high=orderValue(channel,hi);
+    return low+(high-low)*(at-lo);
+  }
+  var output={};
+  for(var channel=0;channel<3;channel++){
+    [10,25,50,75,90].forEach(function(p){output['env_hsv_'+channel+'_p'+p]=quantile(channel,p);});
+    var mean=sum[channel]/Math.max(count,1);
+    output['env_hsv_'+channel+'_mean']=mean;
+    output['env_hsv_'+channel+'_std']=Math.sqrt(Math.max(0,sum2[channel]/Math.max(count,1)-mean*mean));
+  }
+  return output;
+}
+
+function routeH2Environment(features){
+  var model=window.SENSOR_H2_ENVIRONMENT_ROUTER;
+  if(!model||model.type!=='standardized_rbf_svm')return null;
+  var vector=model.features.map(function(name){return features[name];});
+  for(var i=0;i<vector.length;i++)
+    vector[i]=(vector[i]-model.scaler_mean[i])/Math.max(model.scaler_scale[i],1e-9);
+  var score=model.intercept;
+  for(var row=0;row<model.support_vectors.length;row++){
+    var distance=0;
+    for(var column=0;column<vector.length;column++){
+      var delta=vector[column]-model.support_vectors[row][column];distance+=delta*delta;
+    }
+    score+=model.dual_coef[row]*Math.exp(-model.gamma*distance);
+  }
+  return{family:score>=0?model.classes[1]:model.classes[0],score:score};
+}
+
 function detectAndClassify(src){
   var h=src.rows, w=src.cols;
+  var environmentFeatures=environmentHsvFeatures(src);
+  var environmentRoute=routeH2Environment(environmentFeatures);
   var bCx,bCy,bR,nCircles=0,nValidCircles=0,bBr=255,roiSource='auto',bScore=-1;
 
   if(manualROI){
@@ -1324,8 +1392,12 @@ function detectAndClassify(src){
     flame_chroma_p75:percentile(flameChroma,75),
     flame_chroma_p90:percentile(flameChroma,90),
     _dropRegistration:activeRegistration,
-    _circleRegistration:{cx:bCx/w,cy:bCy/h,r:bR/Math.min(h,w)}
+    _circleRegistration:{cx:bCx/w,cy:bCy/h,r:bR/Math.min(h,w)},
+    _h2Environment:environmentRoute?environmentRoute.family:null,
+    _h2EnvironmentScore:environmentRoute?environmentRoute.score:null
   };
+  for(var environmentName in environmentFeatures)
+    feat[environmentName]=environmentFeatures[environmentName];
 
   var clf=doClassify(feat);
   clf._raw=feat;
@@ -1337,6 +1409,8 @@ function detectAndClassify(src){
       activeRegistration.y.toFixed(2)+','+(activeRegistration.angle*180/Math.PI).toFixed(1)+'deg'):'fallback')+
     ') pH2='+(clf.h2p==null?'-':Number(clf.h2p).toFixed(3))+
     ' pRH='+(clf.rhp==null?'-':Number(clf.rhp).toFixed(3))+
+    ' env='+(h2Environment||(environmentRoute?environmentRoute.family:'?'))+
+    (environmentRoute?'('+environmentRoute.score.toFixed(2)+')':'')+
     (calibrated?' [CAL]':' [DEF]')+' ['+roiSource+'] '+APP_VERSION;
   clf._dbgGeo={cx:bCx,cy:bCy,r:bR,innerR:innerR,w:w,h:h,
     totalCircles:nCircles,validCircles:nValidCircles,
