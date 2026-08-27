@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.27 · Simultaneous quantitation gate v16</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.27 · H2-only RH display fix v17</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -218,7 +218,7 @@ body{
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.27-simultaneous-quantitation-gate-v16';
+var APP_VERSION='2026.08.27-h2-only-rh-display-fix-v17';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -762,11 +762,14 @@ function showResult(r){
   if(r.state==='no_sensor'){rhE.textContent='-';rhE.style.color='#999';}
   else if(!calibrated){rhE.textContent='Calibrate first';rhE.style.color='#ff9800';}
   else if(r.rhSimPending){rhE.textContent='Simultaneous RH correction pending — number hidden';rhE.style.color='#ff9800';}
-  else if(r.rhEndpointShadow&&r.state!=='H2O_only'){
-    rhE.textContent=r.rhEndpointShadow.text+'% RH (endpoint shadow only; state='+(SN[r.state]||r.state)+')';
-    rhE.style.color='#ff9800';
-  }
   else if(r.state==='undecided'){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
+  // For Initial and H2-only, RH is the known low-RH/recovery condition. The
+  // endpoint shadow is a developer diagnostic and must not override this
+  // physically selected state in the user-facing concentration result.
+  else if(r.state==='initial'||r.state==='H2_only'){
+    rhE.textContent=(r.rhQuant?r.rhQuant.text:'20–30')+'% RH (low-RH / recovery condition)';
+    rhE.style.color='#222';
+  }
   else if(!r.rhQuant){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhQuant.outside){rhE.textContent='Outside trained range / Retake';rhE.style.color='#ef5350';}
   else{rhE.textContent=r.rhQuant.text+'% RH ('+
