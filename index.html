@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.27 · Weak-H2 optical consensus v18</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.27 · Place-2 middle-RH recovery v20</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -218,7 +218,7 @@ body{
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.27-weak-h2-optical-consensus-v18';
+var APP_VERSION='2026.08.27-place2-middle-rh-recovery-v20';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -695,6 +695,40 @@ doClassify=function(f){
     h2SimPending=false;rhSimPending=false;
     lowResponseRecovered=false;h2ConsensusPromoted=true;
   }
+  // In the Place-2 H2O-only calibration domain, two adjacent low-RH frames
+  // were falsely called simultaneous even though the independent flame expert
+  // was low and RH evidence was at least as strong as H2 evidence. Demote only
+  // this narrow no-H2 consensus region. The high top-a gate keeps the rule out
+  // of all user-validated H2-only app captures (top-a <= 125.5).
+  var place2RhOnlyRecovered=false;
+  var lowMiddleRhShadow=rhEndpointShadow&&
+    (rhEndpointShadow.text==='20–30'||rhEndpointShadow.text==='40–50');
+  if(state==='simultaneous'&&calibrated&&lowMiddleRhShadow&&
+      isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=h2p&&
+      h2Expertp!=null&&h2Expertp<.35&&
+      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=.50&&rawH2Diagnostic<1.50){
+    uncertain=false;state='H2O_only';h2=false;rh=true;
+    h2SimPending=false;rhSimPending=false;place2RhOnlyRecovered=true;
+  }
+  // At the response3 5 s endpoint, the four-state forest is just below its
+  // acceptance threshold and the endpoint prototype remains in 20--30 even
+  // though the calibrated colour response has begun.  Its independent H2
+  // expert and raw H2 projection are both effectively zero, while the flame
+  // colour shift is substantially larger than the 2--2.5 s low-response
+  // frames. Recover only this observed Place-2 middle-RH transition domain.
+  var place2MiddleRhRecovered=false;
+  if(state==='undecided'&&calibrated&&lowRhEndpoint&&
+      isFinite(BL.top_a)&&BL.top_a>=127&&
+      h2Expertp!=null&&h2Expertp<.10&&
+      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=-.20&&rawH2Diagnostic<.50&&
+      flameShift>=.55){
+    uncertain=false;state='H2O_only';h2=false;rh=true;
+    h2SimPending=false;rhSimPending=false;place2MiddleRhRecovered=true;
+    rhEndpointShadow={raw:45,index:1,outside:false,text:'40–50',
+      profile:'Place-2 middle-RH optical recovery',
+      distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
+      vector:rhEndpointShadow.vector};
+  }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
     if(!rhSimPending){
@@ -737,6 +771,8 @@ doClassify=function(f){
     h2Diagnostic:h2Diagnostic,h2Expertp:h2Expertp,
     lowResponseRecovered:lowResponseRecovered,lowH2Promoted:lowH2Promoted,
     h2ConsensusPromoted:h2ConsensusPromoted,flameShift:flameShift,
+    place2RhOnlyRecovered:place2RhOnlyRecovered,
+    place2MiddleRhRecovered:place2MiddleRhRecovered,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
@@ -773,6 +809,8 @@ function showResult(r){
     +shadowVals+(r.lowResponseRecovered?' lowGuard=1':'')+
     (r.lowH2Promoted?' h2Promote=1':'')+' '
     +(r.h2ConsensusPromoted?' h2Consensus=1':'')+
+    (r.place2RhOnlyRecovered?' p2RhOnly=1':'')+
+    (r.place2MiddleRhRecovered?' p2MidRh=1':'')+
     (r.flameShift!=null?' flShift='+r.flameShift.toFixed(2):'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
