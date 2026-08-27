@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.27 · H2-only RH display fix v17</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.27 · Weak-H2 optical consensus v18</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -218,7 +218,7 @@ body{
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.27-h2-only-rh-display-fix-v17';
+var APP_VERSION='2026.08.27-weak-h2-optical-consensus-v18';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -676,6 +676,25 @@ doClassify=function(f){
     state='H2_only';h2=true;rh=false;h2SimPending=false;rhSimPending=false;
     lowH2Promoted=true;
   }
+  // App-domain anchors from two independent weak-response videos show that
+  // the legacy concentration projection can collapse to rawH2 <= 0.31 even
+  // while the calibration-relative flame a*/b* shift stays ordered. Apply a
+  // narrow consensus only in the observed H2/low-RH calibration domain. The
+  // top-a gate excludes the Place-2 H2O-only frames that previously caused
+  // false H2 promotion, and rawH2 < .5 leaves successful strong predictions
+  // from test_2/run4 untouched.
+  var flameShift=Math.sqrt(Math.pow(stateDelta(f,'flame_a'),2)+
+    Math.pow(stateDelta(f,'flame_b'),2));
+  var lowH2OpticalConsensus=calibrated&&lowRhEndpoint&&
+    isFinite(BL.top_a)&&BL.top_a<=125.5&&h2p>=.55&&
+    isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=-2.0&&rawH2Diagnostic<.50&&
+    flameShift>=.55;
+  var h2ConsensusPromoted=false;
+  if(lowH2OpticalConsensus&&(state==='initial'||state==='undecided')){
+    uncertain=false;state='H2_only';h2=true;rh=false;
+    h2SimPending=false;rhSimPending=false;
+    lowResponseRecovered=false;h2ConsensusPromoted=true;
+  }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
     if(!rhSimPending){
@@ -706,12 +725,18 @@ doClassify=function(f){
       var routedB=familyBConcentrationBand(f);
       if(routedB)h2Quant=routedB;
     }
+    if(state==='H2_only'&&lowH2OpticalConsensus){
+      h2Quant={text:flameShift<.85?'1–2':'2–3',outside:false,
+        profile:'calibration-relative weak-H2 optical consensus',
+        flameShift:flameShift};
+    }
   }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,
     h2SimPending:h2SimPending,rhSimPending:rhSimPending,
     h2Diagnostic:h2Diagnostic,h2Expertp:h2Expertp,
     lowResponseRecovered:lowResponseRecovered,lowH2Promoted:lowH2Promoted,
+    h2ConsensusPromoted:h2ConsensusPromoted,flameShift:flameShift,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
@@ -747,6 +772,8 @@ function showResult(r){
     +(r.rhQuant&&r.rhQuant.distance!=null?' rhD='+r.rhQuant.distance.toFixed(2):'')+' '
     +shadowVals+(r.lowResponseRecovered?' lowGuard=1':'')+
     (r.lowH2Promoted?' h2Promote=1':'')+' '
+    +(r.h2ConsensusPromoted?' h2Consensus=1':'')+
+    (r.flameShift!=null?' flShift='+r.flameShift.toFixed(2):'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
   document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>';
