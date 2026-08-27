@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.27 · Routed H2 range model v15</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.27 · Simultaneous quantitation gate v16</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -218,7 +218,7 @@ body{
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.27-routed-h2-range-model-v15';
+var APP_VERSION='2026.08.27-simultaneous-quantitation-gate-v16';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -634,7 +634,8 @@ doClassify=function(f){
     var h2ExpertVector=stateFeatures(SENSOR_MODEL.h2_presence,f);
     h2Expertp=forestProb(SENSOR_MODEL.h2_presence,h2ExpertVector);
   }
-  var h2Quant=null,rhQuant=null,rhEndpointShadow=null,rhSimPending=state==='simultaneous';
+  var h2Quant=null,rhQuant=null,rhEndpointShadow=null;
+  var h2SimPending=state==='simultaneous',rhSimPending=state==='simultaneous';
   var h2Diagnostic=null;
   if(calibrated&&window.SENSOR_CONCENTRATION_MODEL)
     h2Diagnostic=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
@@ -660,7 +661,7 @@ doClassify=function(f){
   var lowConfidenceH2Candidate=uncertain||
     (state==='H2_only'&&maxProb<.45);
   if(directLowChroma&&opticallyNoH2&&lowConfidenceH2Candidate){
-    uncertain=false;state='initial';h2=false;rh=false;rhSimPending=false;
+    uncertain=false;state='initial';h2=false;rh=false;h2SimPending=false;rhSimPending=false;
     lowResponseRecovered=true;
   }
   // Conversely, a weak four-state Initial can lag behind a genuine low-H2
@@ -672,7 +673,7 @@ doClassify=function(f){
   if(!uncertain&&state==='initial'&&maxProb<.50&&
       h2p>=.40&&h2Expertp!=null&&h2Expertp>=.55&&
       isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=1.50){
-    state='H2_only';h2=true;rh=false;rhSimPending=false;
+    state='H2_only';h2=true;rh=false;h2SimPending=false;rhSimPending=false;
     lowH2Promoted=true;
   }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
@@ -707,7 +708,8 @@ doClassify=function(f){
     }
   }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
-    h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,rhSimPending:rhSimPending,
+    h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,
+    h2SimPending:h2SimPending,rhSimPending:rhSimPending,
     h2Diagnostic:h2Diagnostic,h2Expertp:h2Expertp,
     lowResponseRecovered:lowResponseRecovered,lowH2Promoted:lowH2Promoted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
@@ -751,19 +753,20 @@ function showResult(r){
 
   var h2E=document.getElementById('h2Val');
   h2E.textContent=r.state==='no_sensor'?'-':(r.state==='undecided'?'Uncertain':
+    (r.h2SimPending?'Simultaneous H₂ correction pending — number hidden':
     (!calibrated?'Calibrate first':(!r.h2Quant?'Uncertain':
-      (r.h2Quant.outside?'Outside trained range / Retake':r.h2Quant.text+'% H₂ (experimental)'))));
+      (r.h2Quant.outside?'Outside trained range / Retake':r.h2Quant.text+'% H₂ (experimental)')))));
   h2E.style.color=r.h2?'#ef5350':'#222';
 
   var rhE=document.getElementById('rhVal');
   if(r.state==='no_sensor'){rhE.textContent='-';rhE.style.color='#999';}
   else if(!calibrated){rhE.textContent='Calibrate first';rhE.style.color='#ff9800';}
+  else if(r.rhSimPending){rhE.textContent='Simultaneous RH correction pending — number hidden';rhE.style.color='#ff9800';}
   else if(r.rhEndpointShadow&&r.state!=='H2O_only'){
     rhE.textContent=r.rhEndpointShadow.text+'% RH (endpoint shadow only; state='+(SN[r.state]||r.state)+')';
     rhE.style.color='#ff9800';
   }
   else if(r.state==='undecided'){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
-  else if(r.rhSimPending){rhE.textContent='Simultaneous RH correction pending — number hidden';rhE.style.color='#ff9800';}
   else if(!r.rhQuant){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhQuant.outside){rhE.textContent='Outside trained range / Retake';rhE.style.color='#ef5350';}
   else{rhE.textContent=r.rhQuant.text+'% RH ('+
