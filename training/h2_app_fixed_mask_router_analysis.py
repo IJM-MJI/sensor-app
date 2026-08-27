@@ -98,10 +98,34 @@ def prepared(frame, circle, orientation):
 
 def calibration_grid(frame, circle, orientation):
     lab, bg, zone, nx, ny = prepared(frame, circle, orientation)
-    selected = shape_pixel_mask(lab, zone, bg)
+    # Calibration is the yellow/olive H2=0 flame. A broad percentile mask also
+    # selected substrate texture across the whole search rectangle. Restrict to
+    # the physical upper mark and require positive b* contrast, then retain only
+    # substantial connected ink components.
+    tight = zone & (nx >= -.40) & (nx <= .25) & (ny >= -.58) & (ny <= .08)
+    selected = shape_pixel_mask(lab, tight, bg, percentile=55.0)
+    selected &= (lab[:, :, 2] - bg[2]) >= 3.0
+    binary = selected.astype(np.uint8)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, 8)
+    keep = np.zeros(selected.shape, dtype=bool)
+    ranked = []
+    for component in range(1, count):
+        area = int(stats[component, cv2.CC_STAT_AREA])
+        if area < 8:
+            continue
+        cx, cy = centroids[component]
+        local_x = (cx - circle[0]) / max(circle[2], 1)
+        local_y = (cy - circle[1]) / max(circle[2], 1)
+        position = np.exp(-2.0 * ((local_x + .08) ** 2 + (local_y + .27) ** 2))
+        ranked.append((area * position, component))
+    for _, component in sorted(ranked, reverse=True)[:6]:
+        keep |= labels == component
+    if int(keep.sum()) >= 20:
+        selected = keep
     gx = np.floor((nx + .55) / .90 * GRID_X).astype(int)
     gy = np.floor((ny + .62) / .76 * GRID_Y).astype(int)
-    valid = zone & (gx >= 0) & (gx < GRID_X) & (gy >= 0) & (gy < GRID_Y)
+    valid = tight & (gx >= 0) & (gx < GRID_X) & (gy >= 0) & (gy < GRID_Y)
     total = np.zeros((GRID_Y, GRID_X), dtype=int)
     chosen = np.zeros_like(total)
     np.add.at(total, (gy[valid], gx[valid]), 1)

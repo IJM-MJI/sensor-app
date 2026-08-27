@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.27 · Automatic H2 environment router v14</span></div>
+<div class="header">Sensor Data<span class="app-version">2026.08.27 · Routed H2 range model v15</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -216,8 +216,9 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-state-model.js?v=20260825-5"></script>
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
+<script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.27-automatic-h2-environment-router-v14';
+var APP_VERSION='2026.08.27-routed-h2-range-model-v15';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -234,6 +235,8 @@ var dropRegistration=null;
 var circleRegistration=null;
 var h2Environment=null;
 var h2EnvironmentScore=null;
+var flameMaskRegistration=null;
+var h2FixedBaseline=null;
 var displayEnhanced=false;
 
 function setDisplayEnhancement(enabled){
@@ -261,6 +264,8 @@ function saveCal(feat){
   }:null;
   h2Environment=feat._h2Environment||null;
   h2EnvironmentScore=isFinite(feat._h2EnvironmentScore)?feat._h2EnvironmentScore:null;
+  flameMaskRegistration=feat._flameMaskRegistration||null;
+  h2FixedBaseline=feat._h2FixedBaseline||null;
   calibrated=true;
   updateCalUI();
 }
@@ -272,6 +277,8 @@ function clearCal(){
   circleRegistration=null;
   h2Environment=null;
   h2EnvironmentScore=null;
+  flameMaskRegistration=null;
+  h2FixedBaseline=null;
   manualROI=null;
   updateCalUI();
 
@@ -539,6 +546,22 @@ function concentrationBand(model,f){
   return{raw:raw,index:best,outside:outside,
     text:boundary>=0?(model.display_levels[boundary]+'–'+model.display_levels[boundary+1]):model.display_levels[best]};
 }
+function familyBConcentrationBand(f){
+  var model=window.SENSOR_H2_FAMILY_B_MODEL;
+  if(!model||model.type!=='fixed_flame_linear_scores')return null;
+  var vector=[];
+  for(var i=0;i<6;i++){
+    var value=f['h2_fixed_ratio_'+i];if(!isFinite(value))return null;vector.push(value);
+  }
+  var best=0,bestScore=-Infinity;
+  for(var row=0;row<model.classes.length;row++){
+    var score=model.intercepts[row];
+    for(var column=0;column<vector.length;column++)score+=model.coefficients[row][column]*vector[column];
+    if(score>bestScore){bestScore=score;best=row;}
+  }
+  return{raw:model.classes[best],index:best,outside:false,
+    text:model.display_levels[best],profile:'H2 environment B fixed-mask experimental'};
+}
 function place2EndpointRhBand(model,f){
   if(!model||model.type!=='standardized_1nn')return null;
   var channels=['L','a','b'],values=[];
@@ -675,6 +698,12 @@ doClassify=function(f){
       rhQuant={text:'20–30',outside:false};
     }else if(state==='H2O_only'){
       h2Quant={text:'0',outside:false};
+    }
+    // Environment A keeps the stronger existing model. Environment B uses the
+    // independently held-out fixed-mask range model (0 / 1-2 / 2-3 only).
+    if(state==='H2_only'&&h2Environment==='B'){
+      var routedB=familyBConcentrationBand(f);
+      if(routedB)h2Quant=routedB;
     }
   }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
@@ -1371,6 +1400,106 @@ function detectAndClassify(src){
     return sorted[lo]+(sorted[hi]-sorted[lo])*(at-lo);
   }
 
+  function buildFixedFlameRegistration(){
+    var gridW=36,gridH=32,tight=[],distances=[];
+    for(var i=0;i<allPx.length;i++){
+      var p=allPx[i];
+      if(p.nx<-.40||p.nx>.25||p.ny<-.58||p.ny>.08)continue;
+      var dL=.35*(p.L-bgL),da=p.a-bgA,db=p.b-bgB;
+      var distance=Math.sqrt(dL*dL+da*da+db*db);
+      tight.push({p:p,d:distance});distances.push(distance);
+    }
+    distances.sort(function(a,b){return a-b;});
+    var cutoff=Math.max(6,percentile(distances,55));
+    var candidates=tight.filter(function(q){return q.d>=cutoff&&(q.p.b-bgB)>=3;});
+    var chosen=candidates;
+    // Match the training mask: 3x3 opening followed by the six strongest
+    // connected warm-ink components. Fall back to the warm candidates if the
+    // browser build lacks connected-component support.
+    if(typeof cv.connectedComponentsWithStats==='function'&&candidates.length>=20){
+      try{
+      var binary=cv.Mat.zeros(h,w,cv.CV_8UC1);
+      for(var i=0;i<candidates.length;i++)binary.ucharPtr(candidates[i].p.y,candidates[i].p.x)[0]=255;
+      var opened=new cv.Mat(),kernel=cv.Mat.ones(3,3,cv.CV_8U);
+      cv.morphologyEx(binary,opened,cv.MORPH_OPEN,kernel);
+      var labels=new cv.Mat(),stats=new cv.Mat(),centroids=new cv.Mat();
+      var count=cv.connectedComponentsWithStats(opened,labels,stats,centroids,8,cv.CV_32S);
+      var ranked=[];
+      for(var component=1;component<count;component++){
+        var area=stats.intAt(component,cv.CC_STAT_AREA);if(area<8)continue;
+        var cx=centroids.doubleAt(component,0),cy=centroids.doubleAt(component,1);
+        var localX=(cx-bCx)/Math.max(bR,1),localY=(cy-bCy)/Math.max(bR,1);
+        var position=Math.exp(-2*(Math.pow(localX+.08,2)+Math.pow(localY+.27,2)));
+        ranked.push({component:component,score:area*position});
+      }
+      ranked.sort(function(a,b){return b.score-a.score;});
+      var keep={};for(var i=0;i<Math.min(6,ranked.length);i++)keep[ranked[i].component]=true;
+      var connected=candidates.filter(function(q){return !!keep[labels.intAt(q.p.y,q.p.x)];});
+      if(connected.length>=20)chosen=connected;
+      binary.delete();opened.delete();kernel.delete();labels.delete();stats.delete();centroids.delete();
+      }catch(componentError){
+        console.warn('Fixed flame component cleanup unavailable; using warm-pixel mask.',componentError);
+      }
+    }
+    var total=new Array(gridW*gridH).fill(0),selected=new Array(gridW*gridH).fill(0);
+    function cell(p){
+      var gx=Math.floor((p.nx+.55)/.90*gridW),gy=Math.floor((p.ny+.62)/.76*gridH);
+      return gx>=0&&gx<gridW&&gy>=0&&gy<gridH?gy*gridW+gx:-1;
+    }
+    for(var i=0;i<tight.length;i++){var at=cell(tight[i].p);if(at>=0)total[at]++;}
+    for(var i=0;i<chosen.length;i++){var at=cell(chosen[i].p);if(at>=0)selected[at]++;}
+    var cells=selected.map(function(value,index){return value>=2&&value/Math.max(total[index],1)>=.35?1:0;});
+    if(cells.reduce(function(a,b){return a+b;},0)<12)
+      cells=selected.map(function(value){return value>0?1:0;});
+    return{width:gridW,height:gridH,cells:cells};
+  }
+
+  function fixedFlameSummary(registration){
+    if(!registration||!registration.cells)return null;
+    var selected=[],local=[];
+    for(var i=0;i<allPx.length;i++){
+      var p=allPx[i];
+      if(p.nx<-.55||p.nx>.35||p.ny<-.62||p.ny>.14)continue;
+      var gx=Math.floor((p.nx+.55)/.90*registration.width);
+      var gy=Math.floor((p.ny+.62)/.76*registration.height);
+      var inMask=gx>=0&&gx<registration.width&&gy>=0&&gy<registration.height&&
+        registration.cells[gy*registration.width+gx];
+      if(inMask)selected.push(p);else local.push(p);
+    }
+    if(selected.length<20||local.length<30)return null;
+    var center=[numericMedian(local.map(function(p){return p.L;})),
+      numericMedian(local.map(function(p){return p.a;})),
+      numericMedian(local.map(function(p){return p.b;}))];
+    var ranked=local.map(function(p){
+      var dL=.25*(p.L-center[0]),da=p.a-center[1],db=p.b-center[2];
+      return{p:p,d:Math.sqrt(dL*dL+da*da+db*db)};
+    });
+    var localDistances=ranked.map(function(q){return q.d;}).sort(function(a,b){return a-b;});
+    var localCutoff=percentile(localDistances,45);
+    var substrate=ranked.filter(function(q){return q.d<=localCutoff;}).map(function(q){return q.p;});
+    var background=[numericMedian(substrate.map(function(p){return p.L;})),
+      numericMedian(substrate.map(function(p){return p.a;})),
+      numericMedian(substrate.map(function(p){return p.b;}))];
+    var relative=selected.map(function(p){return[p.L-background[0],p.a-background[1],p.b-background[2]];});
+    var mean=[0,0,0];
+    for(var i=0;i<relative.length;i++)for(var channel=0;channel<3;channel++)mean[channel]+=relative[i][channel];
+    for(var channel=0;channel<3;channel++)mean[channel]/=relative.length;
+    var median=[0,1,2].map(function(channel){return numericMedian(relative.map(function(v){return v[channel];}));});
+    var chroma=relative.map(function(v){return Math.sqrt(v[1]*v[1]+v[2]*v[2]);}).sort(function(a,b){return a-b;});
+    return mean.concat(median,[10,25,50,75,90].map(function(p){return percentile(chroma,p);}));
+  }
+
+  var activeFlameMask=calibrated?flameMaskRegistration:buildFixedFlameRegistration();
+  var fixedSummary=fixedFlameSummary(activeFlameMask);
+  var fixedReference=calibrated?h2FixedBaseline:fixedSummary;
+  var fixedRatio=null;
+  if(fixedSummary&&fixedReference){
+    fixedRatio=[];
+    for(var fixedIndex=0;fixedIndex<6;fixedIndex++)
+      fixedRatio.push((fixedSummary[fixedIndex]-fixedReference[fixedIndex])/
+        Math.max(Math.abs(fixedReference[fixedIndex]),.5));
+  }
+
   // 4. Classify
   var feat={
     flame_L:flameL,flame_a:flameA,flame_b:flameB,
@@ -1394,8 +1523,12 @@ function detectAndClassify(src){
     _dropRegistration:activeRegistration,
     _circleRegistration:{cx:bCx/w,cy:bCy/h,r:bR/Math.min(h,w)},
     _h2Environment:environmentRoute?environmentRoute.family:null,
-    _h2EnvironmentScore:environmentRoute?environmentRoute.score:null
+    _h2EnvironmentScore:environmentRoute?environmentRoute.score:null,
+    _flameMaskRegistration:activeFlameMask,
+    _h2FixedBaseline:fixedReference
   };
+  if(fixedRatio)for(var fixedIndex=0;fixedIndex<fixedRatio.length;fixedIndex++)
+    feat['h2_fixed_ratio_'+fixedIndex]=fixedRatio[fixedIndex];
   for(var environmentName in environmentFeatures)
     feat[environmentName]=environmentFeatures[environmentName];
 
