@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · H2 environment-A zero consensus v21</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v22</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -214,12 +214,13 @@ body{
 <script src="sensor-model.js?v=20260813-3"></script>
 <script src="sensor-concentration-model.js?v=20260819-1"></script>
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
+<script src="sensor-rh-place2-seven-band-model.js?v=20260828-1"></script>
 <script src="sensor-state-model.js?v=20260825-5"></script>
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.27-H2-A-zero-consensus-v21';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v22';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -652,8 +653,10 @@ doClassify=function(f){
   var h2Diagnostic=null;
   if(calibrated&&window.SENSOR_CONCENTRATION_MODEL)
     h2Diagnostic=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
-  if(calibrated&&window.SENSOR_RH_PLACE2_ENDPOINT_MODEL)
-    rhEndpointShadow=place2EndpointRhBand(SENSOR_RH_PLACE2_ENDPOINT_MODEL,f);
+  var place2RhModel=window.SENSOR_RH_PLACE2_SEVEN_BAND_MODEL||
+    window.SENSOR_RH_PLACE2_ENDPOINT_MODEL;
+  if(calibrated&&place2RhModel)
+    rhEndpointShadow=place2EndpointRhBand(place2RhModel,f);
   // A low-RH monitor frame can be darker than calibration while showing no
   // chromatic gas response. App-domain v9 repeats separated genuine H2
   // endpoints (rawH2 0.25, 1.47, 3.44, 5.25) from the two RH-only errors
@@ -663,8 +666,7 @@ doClassify=function(f){
   // extrapolation at rawH2=-7.06 rather than silently calling it Initial.
   var lowResponseRecovered=false;
   var shadowVector=rhEndpointShadow&&rhEndpointShadow.vector;
-  var shadowLimit=window.SENSOR_RH_PLACE2_ENDPOINT_MODEL&&
-    SENSOR_RH_PLACE2_ENDPOINT_MODEL.low_chroma_abs_ab_max;
+  var shadowLimit=place2RhModel&&place2RhModel.low_chroma_abs_ab_max;
   var directLowChroma=shadowVector&&isFinite(shadowLimit)&&
     Math.abs(shadowVector[1])<=shadowLimit&&Math.abs(shadowVector[2])<=shadowLimit;
   var rawH2Diagnostic=h2Diagnostic&&h2Diagnostic.raw;
@@ -715,7 +717,8 @@ doClassify=function(f){
   // of all user-validated H2-only app captures (top-a <= 125.5).
   var place2RhOnlyRecovered=false;
   var lowMiddleRhShadow=rhEndpointShadow&&
-    (rhEndpointShadow.text==='20–30'||rhEndpointShadow.text==='40–50');
+    (rhEndpointShadow.text==='20–30'||rhEndpointShadow.text==='30–40'||
+     rhEndpointShadow.text==='40–50');
   if(state==='simultaneous'&&calibrated&&lowMiddleRhShadow&&
       isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=h2p&&
       h2Expertp!=null&&h2Expertp<.35&&
@@ -737,7 +740,7 @@ doClassify=function(f){
       flameShift>=.55){
     uncertain=false;state='H2O_only';h2=false;rh=true;
     h2SimPending=false;rhSimPending=false;place2MiddleRhRecovered=true;
-    rhEndpointShadow={raw:45,index:1,outside:false,text:'40–50',
+    rhEndpointShadow={raw:35,index:1,outside:false,text:'30–40',
       profile:'Place-2 middle-RH optical recovery',
       distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
       vector:rhEndpointShadow.vector};
