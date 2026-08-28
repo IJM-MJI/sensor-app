@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v23</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v24</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v23';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v24';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -745,6 +745,29 @@ doClassify=function(f){
       distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
       vector:rhEndpointShadow.vector};
   }
+  // response3 5 s is the next optical point after the validated 3 s
+  // 30--40% frame. Its RH probability is dominant (0.62) and the H2
+  // concentration projection remains at zero, but the legacy four-state
+  // forest lands just below its acceptance threshold. Recover this only in
+  // the high-top-a Place-2 RH-only domain. The top-a gate excludes the
+  // validated H2-only environments, while the zero-H2 and RH-dominance gates
+  // keep the rule away from simultaneous/H2 responses.
+  var place2EarlyMiddleRhRecovered=false;
+  var earlyMiddleRhShadow=rhEndpointShadow&&
+    (rhEndpointShadow.text==='20–30'||rhEndpointShadow.text==='30–40'||
+     rhEndpointShadow.text==='40–50');
+  if(state==='undecided'&&calibrated&&earlyMiddleRhShadow&&
+      isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=.55&&h2p<=.45&&
+      h2Expertp!=null&&h2Expertp<.25&&
+      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=-.20&&rawH2Diagnostic<.50&&
+      flameShift>=.55){
+    uncertain=false;state='H2O_only';h2=false;rh=true;
+    h2SimPending=false;rhSimPending=false;place2EarlyMiddleRhRecovered=true;
+    rhEndpointShadow={raw:35,index:1,outside:false,text:'30–40',
+      profile:'Place-2 early middle-RH optical recovery',
+      distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
+      vector:rhEndpointShadow.vector};
+  }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
     if(!rhSimPending){
@@ -807,6 +830,7 @@ doClassify=function(f){
     h2ConsensusPromoted:h2ConsensusPromoted,flameShift:flameShift,
     place2RhOnlyRecovered:place2RhOnlyRecovered,
     place2MiddleRhRecovered:place2MiddleRhRecovered,
+    place2EarlyMiddleRhRecovered:place2EarlyMiddleRhRecovered,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
