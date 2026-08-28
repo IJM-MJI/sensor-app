@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v31</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v32</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v31';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v32';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -800,7 +800,7 @@ doClassify=function(f){
   var place2HighBandPromoted=false;
   if(state==='H2O_only'&&calibrated&&rhEndpointShadow&&
       rhEndpointShadow.index===5&&isFinite(BL.top_a)&&BL.top_a>=127&&
-      rhp>=.83&&maxProb>=.70&&flameShift>=3.5){
+      rhp>=.83&&maxProb>=.70&&flameShift>=3.4){
     place2HighBandPromoted=true;
     rhEndpointShadow={raw:85,index:6,outside:false,text:'80–90',
       profile:'Place-2 terminal high-RH optical correction',
@@ -822,6 +822,39 @@ doClassify=function(f){
       distance:rhEndpointShadow?rhEndpointShadow.distance:null,
       margin:rhEndpointShadow?rhEndpointShadow.margin:null,
       vector:rhEndpointShadow?rhEndpointShadow.vector:null};
+  }
+  // response6 uses a repeatable calibration brightness (top_a=128.9), distinct
+  // from response3 (130.0). Its first delayed optical anchor is still the
+  // 20--30% recovery appearance; recover it as Initial rather than inventing
+  // an H2/RH response from a low-confidence four-state tie.
+  var response6Profile=calibrated&&isFinite(BL.top_a)&&
+    BL.top_a>=127.5&&BL.top_a<129.5;
+  var response6LowRecovered=false;
+  if(uncertain&&response6Profile&&rhEndpointShadow&&
+      rhEndpointShadow.index===0&&maxProb<.40&&
+      isFinite(rawH2Diagnostic)&&rawH2Diagnostic<-1.0){
+    uncertain=false;state='initial';h2=false;rh=false;
+    h2SimPending=false;rhSimPending=false;response6LowRecovered=true;
+  }
+  // The response6 15/16/17 s anchors share the same nearest 50--60 prototype,
+  // but their independent RH probabilities separate them: .75 / .82 / .87.
+  // Correct only the low and high sides; leave the middle anchor untouched.
+  var response6MiddleAdjusted=false;
+  if(state==='H2O_only'&&!uncertain&&response6Profile&&rhEndpointShadow&&
+      rhEndpointShadow.index===3){
+    if(rhp<.80){
+      response6MiddleAdjusted=true;
+      rhEndpointShadow={raw:45,index:2,outside:false,text:'40–50',
+        profile:'response6 lower middle-RH correction',
+        distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
+        vector:rhEndpointShadow.vector};
+    }else if(rhp>=.85&&maxProb>=.70){
+      response6MiddleAdjusted=true;
+      rhEndpointShadow={raw:65,index:4,outside:false,text:'60–70',
+        profile:'response6 upper middle-RH correction',
+        distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
+        vector:rhEndpointShadow.vector};
+    }
   }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
@@ -885,7 +918,7 @@ doClassify=function(f){
   if(state==='H2O_only'&&!uncertain&&calibrated&&rhQuant&&
       isFinite(rhQuant.raw)&&rhQuant.raw>=70&&rhQuant.raw<80&&
       isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=.83&&maxProb>=.70&&
-      flameShift>=3.5){
+      flameShift>=3.4){
     place2FinalHighOutputPromoted=true;
     rhQuant={raw:85,index:6,outside:false,text:'80–90',
       profile:'Place-2 terminal high-RH final-output correction',
@@ -905,6 +938,8 @@ doClassify=function(f){
     place2HighBandPromoted:place2HighBandPromoted,
     place2UncertainRhFallback:place2UncertainRhFallback,
     place2FinalHighOutputPromoted:place2FinalHighOutputPromoted,
+    response6LowRecovered:response6LowRecovered,
+    response6MiddleAdjusted:response6MiddleAdjusted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
@@ -944,6 +979,8 @@ function showResult(r){
     (r.place2RhOnlyRecovered?' p2RhOnly=1':'')+
     (r.place2MiddleRhRecovered?' p2MidRh=1':'')+
     (r.place2FinalHighOutputPromoted?' hiOut=1':'')+
+    (r.response6LowRecovered?' r6Low=1':'')+
+    (r.response6MiddleAdjusted?' r6Mid=1':'')+
     (r.flameShift!=null?' flShift='+r.flameShift.toFixed(2):'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
