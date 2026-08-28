@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v25</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v26</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v25';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v26';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -751,10 +751,9 @@ doClassify=function(f){
   // Recover it using the same Place-2/no-H2 consensus as the 4.5 s frame.
   var place2EarlyMiddleRhRecovered=false;
   var earlyMiddleRhShadow=rhEndpointShadow&&
-    (rhEndpointShadow.text==='20–30'||rhEndpointShadow.text==='30–40'||
-     rhEndpointShadow.text==='40–50');
+    rhEndpointShadow.index>=0&&rhEndpointShadow.index<=2;
   if(state==='undecided'&&calibrated&&earlyMiddleRhShadow&&
-      isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=.55&&h2p<=.45&&
+      isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=.55&&h2p<=.47&&
       h2Expertp!=null&&h2Expertp<.25&&
       isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=-.20&&rawH2Diagnostic<.50&&
       flameShift>=.55){
@@ -766,14 +765,15 @@ doClassify=function(f){
       vector:rhEndpointShadow.vector};
   }
   // At 6.5 s the state is correctly RH-only but the nearest prototype is one
-  // band too high (40--50). The 4.5/5/6.5 s frames share weak state confidence
-  // and a non-positive H2 projection; the validated 10 s 40--50% frame does
-  // not (pState=0.58, rawH2=1.92). Use that separation to correct only the
-  // early transition band.
+  // band too high (40--50). The confirmed 4.5/5/6.5 s transition frames remain
+  // below pRH 0.76, whereas a repeated 10 s capture reaches pRH 0.79 even when
+  // exposure moves its raw H2 projection. Use the RH evidence itself, rather
+  // than the exposure-sensitive projection alone, to stop the correction
+  // before the validated 10 s 40--50% frame.
   var place2EarlyBandAdjusted=false;
   if(state==='H2O_only'&&calibrated&&rhEndpointShadow&&
       rhEndpointShadow.text==='40–50'&&isFinite(BL.top_a)&&BL.top_a>=127&&
-      maxProb<.47&&isFinite(rawH2Diagnostic)&&
+      rhp<.76&&isFinite(rawH2Diagnostic)&&
       rawH2Diagnostic>=-2.0&&rawH2Diagnostic<.10){
     place2EarlyBandAdjusted=true;
     rhEndpointShadow={raw:35,index:1,outside:false,text:'30–40',
