@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v22</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v23</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v22';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v23';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -780,7 +780,12 @@ doClassify=function(f){
     // corrects only when both models agree that this is the single ambiguous
     // boundary. It never changes 2–3% or 4%, and held-out 1–2% recall remains
     // exactly unchanged (90.2%). Report 0–1 rather than unsupported exact 0.
-    var currentH2Environment=environmentRoute?environmentRoute.family:h2Environment;
+    // `environmentRoute` belongs to detectAndClassify() and is not in this
+    // function's scope. The current frame route is already copied into the
+    // feature object before doClassify() is called. Referencing the local name
+    // here threw a ReferenceError after otherwise successful ROI extraction,
+    // which the UI misleadingly displayed as "No Sensor Detected".
+    var currentH2Environment=f._h2Environment||h2Environment;
     if(state==='H2_only'&&currentH2Environment==='A'&&
         h2Quant&&h2Quant.text==='1–2'){
       var zeroConsensus=familyAZeroConsensus(f);
@@ -1103,8 +1108,11 @@ function finishCapture(){
       drawDebugOverlay(r);
       document.getElementById('dbg').textContent=r.dbg||'';
     }catch(e){
-      document.getElementById('dbg').textContent='Error: '+e.message+' '+e.stack;
-      showResult({state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0});
+      document.getElementById('dbg').textContent='Processing error: '+e.message+' '+e.stack;
+      // A software exception is not evidence that the physical sensor was
+      // absent. Keep these failure modes distinct for field diagnostics.
+      showResult({state:'undecided',conf:'low',h2:null,rh:null,h2S:0,h2oS:0,
+        dbg:'Processing error: '+e.message});
     }
     document.getElementById('procOverlay').classList.add('hidden');
   },100);
