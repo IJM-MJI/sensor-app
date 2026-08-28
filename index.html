@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v24</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v25</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v24';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v25';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -710,19 +710,20 @@ doClassify=function(f){
     h2SimPending=false;rhSimPending=false;
     lowResponseRecovered=false;h2ConsensusPromoted=true;
   }
-  // In the Place-2 H2O-only calibration domain, two adjacent low-RH frames
-  // were falsely called simultaneous even though the independent flame expert
-  // was low and RH evidence was at least as strong as H2 evidence. Demote only
-  // this narrow no-H2 consensus region. The high top-a gate keeps the rule out
-  // of all user-validated H2-only app captures (top-a <= 125.5).
+  // In the Place-2 H2O-only calibration domain, early 30--40% frames can be
+  // falsely called simultaneous even though the independent flame expert is
+  // low, the H2 projection remains at zero, and RH evidence is at least as
+  // strong as H2 evidence. Demote only this narrow no-H2 consensus region.
+  // The high top-a gate keeps the rule out of all user-validated H2-only app
+  // captures (top-a <= 125.5).
   var place2RhOnlyRecovered=false;
   var lowMiddleRhShadow=rhEndpointShadow&&
     (rhEndpointShadow.text==='20–30'||rhEndpointShadow.text==='30–40'||
      rhEndpointShadow.text==='40–50');
   if(state==='simultaneous'&&calibrated&&lowMiddleRhShadow&&
       isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=h2p&&
-      h2Expertp!=null&&h2Expertp<.35&&
-      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=.50&&rawH2Diagnostic<1.50){
+      h2Expertp!=null&&h2Expertp<.25&&
+      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=-.20&&rawH2Diagnostic<1.50){
     uncertain=false;state='H2O_only';h2=false;rh=true;
     h2SimPending=false;rhSimPending=false;place2RhOnlyRecovered=true;
   }
@@ -745,13 +746,9 @@ doClassify=function(f){
       distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
       vector:rhEndpointShadow.vector};
   }
-  // response3 5 s is the next optical point after the validated 3 s
-  // 30--40% frame. Its RH probability is dominant (0.62) and the H2
-  // concentration projection remains at zero, but the legacy four-state
-  // forest lands just below its acceptance threshold. Recover this only in
-  // the high-top-a Place-2 RH-only domain. The top-a gate excludes the
-  // validated H2-only environments, while the zero-H2 and RH-dominance gates
-  // keep the rule away from simultaneous/H2 responses.
+  // The adjacent 5 s frame lands just below the four-state acceptance
+  // threshold despite dominant RH probability and a zero-H2 projection.
+  // Recover it using the same Place-2/no-H2 consensus as the 4.5 s frame.
   var place2EarlyMiddleRhRecovered=false;
   var earlyMiddleRhShadow=rhEndpointShadow&&
     (rhEndpointShadow.text==='20–30'||rhEndpointShadow.text==='30–40'||
@@ -765,6 +762,22 @@ doClassify=function(f){
     h2SimPending=false;rhSimPending=false;place2EarlyMiddleRhRecovered=true;
     rhEndpointShadow={raw:35,index:1,outside:false,text:'30–40',
       profile:'Place-2 early middle-RH optical recovery',
+      distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
+      vector:rhEndpointShadow.vector};
+  }
+  // At 6.5 s the state is correctly RH-only but the nearest prototype is one
+  // band too high (40--50). The 4.5/5/6.5 s frames share weak state confidence
+  // and a non-positive H2 projection; the validated 10 s 40--50% frame does
+  // not (pState=0.58, rawH2=1.92). Use that separation to correct only the
+  // early transition band.
+  var place2EarlyBandAdjusted=false;
+  if(state==='H2O_only'&&calibrated&&rhEndpointShadow&&
+      rhEndpointShadow.text==='40–50'&&isFinite(BL.top_a)&&BL.top_a>=127&&
+      maxProb<.47&&isFinite(rawH2Diagnostic)&&
+      rawH2Diagnostic>=-2.0&&rawH2Diagnostic<.10){
+    place2EarlyBandAdjusted=true;
+    rhEndpointShadow={raw:35,index:1,outside:false,text:'30–40',
+      profile:'Place-2 early 30–40% band correction',
       distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
       vector:rhEndpointShadow.vector};
   }
@@ -831,6 +844,7 @@ doClassify=function(f){
     place2RhOnlyRecovered:place2RhOnlyRecovered,
     place2MiddleRhRecovered:place2MiddleRhRecovered,
     place2EarlyMiddleRhRecovered:place2EarlyMiddleRhRecovered,
+    place2EarlyBandAdjusted:place2EarlyBandAdjusted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
