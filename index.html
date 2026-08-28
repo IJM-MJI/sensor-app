@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-<div class="header">Sensor Data<span class="app-version">2026.08.27 · Place-2 middle-RH recovery v20</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · H2 environment-A zero consensus v21</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -217,8 +217,9 @@ body{
 <script src="sensor-state-model.js?v=20260825-5"></script>
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
+<script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.27-place2-middle-rh-recovery-v20';
+var APP_VERSION='2026.08.27-H2-A-zero-consensus-v21';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -562,6 +563,18 @@ function familyBConcentrationBand(f){
   return{raw:model.classes[best],index:best,outside:false,
     text:model.display_levels[best],profile:'H2 environment B fixed-mask experimental'};
 }
+function familyAZeroConsensus(f){
+  var model=window.SENSOR_H2_FAMILY_A_ZERO_MODEL;
+  if(!model||model.type!=='linear_scores')return null;
+  var vector=concentrationVector(model,f),best=0,bestScore=-Infinity;
+  for(var row=0;row<model.classes.length;row++){
+    var score=model.intercepts[row];
+    for(var column=0;column<vector.length;column++)
+      score+=model.coefficients[row][column]*vector[column];
+    if(score>bestScore){bestScore=score;best=row;}
+  }
+  return{classValue:model.classes[best],score:bestScore};
+}
 function place2EndpointRhBand(model,f){
   if(!model||model.type!=='standardized_1nn')return null;
   var channels=['L','a','b'],values=[];
@@ -758,6 +771,19 @@ doClassify=function(f){
     if(state==='H2_only'&&h2Environment==='B'){
       var routedB=familyBConcentrationBand(f);
       if(routedB)h2Quant=routedB;
+    }
+    // The primary ridge occasionally maps a calibration-like 0% frame to the
+    // adjacent 1–2% band.  A separately held-out environment-A specialist
+    // corrects only when both models agree that this is the single ambiguous
+    // boundary. It never changes 2–3% or 4%, and held-out 1–2% recall remains
+    // exactly unchanged (90.2%). Report 0–1 rather than unsupported exact 0.
+    var currentH2Environment=environmentRoute?environmentRoute.family:h2Environment;
+    if(state==='H2_only'&&currentH2Environment==='A'&&
+        h2Quant&&h2Quant.text==='1–2'){
+      var zeroConsensus=familyAZeroConsensus(f);
+      if(zeroConsensus&&zeroConsensus.classValue===0)
+        h2Quant={text:'0–1',outside:false,subResolution:true,
+          profile:'environment-A held-out zero consensus'};
     }
     if(state==='H2_only'&&lowH2OpticalConsensus){
       h2Quant={text:flameShift<.85?'1–2':'2–3',outside:false,

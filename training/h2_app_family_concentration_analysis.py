@@ -29,7 +29,11 @@ VIDEO_RUN = {
     "1_90_RH20_3_x2.mp4": "run3",
     "1_90_RH20_4_x2.mp4": "run4",
 }
-FAMILIES = {"A": ("test_2", "test_3", "test", "run2"),
+# RH20_2_x2 has a reproducible initial/recovery domain split: its initial 0%
+# frames look optically like a high response while its recovery tail looks like
+# 0%.  Keep it in VIDEO_RUN/WINDOWS for explicit robustness audits, but do not
+# let it set the primary environment-A concentration boundary.
+FAMILIES = {"A": ("test_2", "test_3", "test"),
             "B": ("run3", "run4")}
 DISPLAY = {0: "0", 1: "1–2", 2: "2–3", 3: "4"}
 
@@ -41,7 +45,10 @@ WINDOWS = {
     "test_3": {0: ((0, 3),), 1: ((18, 28),), 2: ((60, 150),)},
     "test": {0: ((0, 3),), 1: ((22, 27),),
              2: ((28, 38),), 3: ((70, 100),)},
-    "run2": {0: ((10, 14), (83, 85)), 1: ((42, 60),)},
+    # The source is a 2x-speed export. The original 0--10 s initial interval
+    # therefore occupies 0--5 s here; 10--14 s is already inside Reaction and
+    # must not be labelled H2 0%.
+    "run2": {0: ((0, 5), (83, 85)), 1: ((42, 60),)},
     "run3": {0: ((0, 4), (95, 97)), 1: ((35, 55),), 2: ((55, 60),)},
     # App cache uses the 2x-speed file. User-confirmed boundaries at 30/50 s
     # in the 181 s normal-speed run therefore become 15/25 s here.
