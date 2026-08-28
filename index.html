@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v26</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v27</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v26';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v27';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -750,13 +750,11 @@ doClassify=function(f){
   // threshold despite dominant RH probability and a zero-H2 projection.
   // Recover it using the same Place-2/no-H2 consensus as the 4.5 s frame.
   var place2EarlyMiddleRhRecovered=false;
-  var earlyMiddleRhShadow=rhEndpointShadow&&
-    rhEndpointShadow.index>=0&&rhEndpointShadow.index<=2;
-  if(state==='undecided'&&calibrated&&earlyMiddleRhShadow&&
-      isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=.55&&h2p<=.47&&
+  if(state==='undecided'&&calibrated&&
+      isFinite(BL.top_a)&&BL.top_a>=127&&maxProb<.40&&
+      rhp>=.55&&rhp>h2p&&
       h2Expertp!=null&&h2Expertp<.25&&
-      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=-.20&&rawH2Diagnostic<.50&&
-      flameShift>=.55){
+      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=-.20&&rawH2Diagnostic<.50){
     uncertain=false;state='H2O_only';h2=false;rh=true;
     h2SimPending=false;rhSimPending=false;place2EarlyMiddleRhRecovered=true;
     rhEndpointShadow={raw:35,index:1,outside:false,text:'30–40',
@@ -778,6 +776,34 @@ doClassify=function(f){
     place2EarlyBandAdjusted=true;
     rhEndpointShadow={raw:35,index:1,outside:false,text:'30–40',
       profile:'Place-2 early 30–40% band correction',
+      distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
+      vector:rhEndpointShadow.vector};
+  }
+  // Monitor capture can move the 10 s prototype to the adjacent 30--40 band.
+  // Its independent RH probability is consistently stronger than the earlier
+  // 4.5--6.5 s transition frames (>=.76 versus <=.72), so restore 40--50 only
+  // when that stronger evidence is present.
+  var place2MiddleBandPromoted=false;
+  if(state==='H2O_only'&&calibrated&&rhEndpointShadow&&
+      rhEndpointShadow.text==='30–40'&&isFinite(BL.top_a)&&BL.top_a>=127&&
+      rhp>=.76){
+    place2MiddleBandPromoted=true;
+    rhEndpointShadow={raw:45,index:2,outside:false,text:'40–50',
+      profile:'Place-2 40–50% RH-evidence correction',
+      distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
+      vector:rhEndpointShadow.vector};
+  }
+  // The late response3 endpoint has a strong, saturated RH-only signature
+  // (pRH=.85, pState=.76, flame shift=5.68) that is clearly beyond the 27 s
+  // 60--70% frame. Promote only this high-confidence 70--80 prototype to the
+  // terminal 80--90 band.
+  var place2HighBandPromoted=false;
+  if(state==='H2O_only'&&calibrated&&rhEndpointShadow&&
+      rhEndpointShadow.text==='70–80'&&isFinite(BL.top_a)&&BL.top_a>=127&&
+      rhp>=.83&&maxProb>=.70&&flameShift>=4.0){
+    place2HighBandPromoted=true;
+    rhEndpointShadow={raw:85,index:6,outside:false,text:'80–90',
+      profile:'Place-2 terminal high-RH optical correction',
       distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
       vector:rhEndpointShadow.vector};
   }
@@ -845,6 +871,8 @@ doClassify=function(f){
     place2MiddleRhRecovered:place2MiddleRhRecovered,
     place2EarlyMiddleRhRecovered:place2EarlyMiddleRhRecovered,
     place2EarlyBandAdjusted:place2EarlyBandAdjusted,
+    place2MiddleBandPromoted:place2MiddleBandPromoted,
+    place2HighBandPromoted:place2HighBandPromoted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
