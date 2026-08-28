@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v29</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v30</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v29';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v30';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -877,6 +877,20 @@ doClassify=function(f){
         flameShift:flameShift};
     }
   }
+  // Apply the terminal promotion to the final concentration object. This is
+  // deliberately after state-dependent quantitation so no later assignment
+  // can replace the corrected band. Use the numeric midpoint rather than a
+  // display label/index to stay independent of model serialization details.
+  var place2FinalHighOutputPromoted=false;
+  if(state==='H2O_only'&&!uncertain&&calibrated&&rhQuant&&
+      isFinite(rhQuant.raw)&&rhQuant.raw>=70&&rhQuant.raw<80&&
+      isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=.83&&maxProb>=.70&&
+      flameShift>=4.0){
+    place2FinalHighOutputPromoted=true;
+    rhQuant={raw:85,index:6,outside:false,text:'80–90',
+      profile:'Place-2 terminal high-RH final-output correction',
+      distance:rhQuant.distance,margin:rhQuant.margin,vector:rhQuant.vector};
+  }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,
     h2SimPending:h2SimPending,rhSimPending:rhSimPending,
@@ -890,6 +904,7 @@ doClassify=function(f){
     place2MiddleBandPromoted:place2MiddleBandPromoted,
     place2HighBandPromoted:place2HighBandPromoted,
     place2UncertainRhFallback:place2UncertainRhFallback,
+    place2FinalHighOutputPromoted:place2FinalHighOutputPromoted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
@@ -928,6 +943,7 @@ function showResult(r){
     +(r.h2ConsensusPromoted?' h2Consensus=1':'')+
     (r.place2RhOnlyRecovered?' p2RhOnly=1':'')+
     (r.place2MiddleRhRecovered?' p2MidRh=1':'')+
+    (r.place2FinalHighOutputPromoted?' hiOut=1':'')+
     (r.flameShift!=null?' flShift='+r.flameShift.toFixed(2):'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
