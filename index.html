@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v30</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v31</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v30';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v31';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -800,7 +800,7 @@ doClassify=function(f){
   var place2HighBandPromoted=false;
   if(state==='H2O_only'&&calibrated&&rhEndpointShadow&&
       rhEndpointShadow.index===5&&isFinite(BL.top_a)&&BL.top_a>=127&&
-      rhp>=.83&&maxProb>=.70&&flameShift>=4.0){
+      rhp>=.83&&maxProb>=.70&&flameShift>=3.5){
     place2HighBandPromoted=true;
     rhEndpointShadow={raw:85,index:6,outside:false,text:'80–90',
       profile:'Place-2 terminal high-RH optical correction',
@@ -885,7 +885,7 @@ doClassify=function(f){
   if(state==='H2O_only'&&!uncertain&&calibrated&&rhQuant&&
       isFinite(rhQuant.raw)&&rhQuant.raw>=70&&rhQuant.raw<80&&
       isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=.83&&maxProb>=.70&&
-      flameShift>=4.0){
+      flameShift>=3.5){
     place2FinalHighOutputPromoted=true;
     rhQuant={raw:85,index:6,outside:false,text:'80–90',
       profile:'Place-2 terminal high-RH final-output correction',
