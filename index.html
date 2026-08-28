@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v27</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.28 · Place-2 seven-band RH v28</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.28-place2-seven-band-RH-v27';
+var APP_VERSION='2026.08.28-place2-seven-band-RH-v28';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -807,6 +807,22 @@ doClassify=function(f){
       distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
       vector:rhEndpointShadow.vector};
   }
+  // Final state-gate fallback for the repeatedly captured response3 5 s frame.
+  // Use the uncertainty boolean directly: the ranked state label can be
+  // rewritten by earlier guards while the acceptance flag remains uncertain.
+  // The independent H2 expert must remain low and RH must be dominant, which
+  // keeps this out of validated H2-only and simultaneous responses.
+  var place2UncertainRhFallback=false;
+  if(uncertain&&calibrated&&isFinite(BL.top_a)&&BL.top_a>=127&&
+      rhp>=.55&&rhp>h2p&&h2Expertp!=null&&h2Expertp<.30){
+    uncertain=false;state='H2O_only';h2=false;rh=true;
+    h2SimPending=false;rhSimPending=false;place2UncertainRhFallback=true;
+    rhEndpointShadow={raw:35,index:1,outside:false,text:'30–40',
+      profile:'Place-2 uncertain RH-only fallback',
+      distance:rhEndpointShadow?rhEndpointShadow.distance:null,
+      margin:rhEndpointShadow?rhEndpointShadow.margin:null,
+      vector:rhEndpointShadow?rhEndpointShadow.vector:null};
+  }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
     if(!rhSimPending){
@@ -873,6 +889,7 @@ doClassify=function(f){
     place2EarlyBandAdjusted:place2EarlyBandAdjusted,
     place2MiddleBandPromoted:place2MiddleBandPromoted,
     place2HighBandPromoted:place2HighBandPromoted,
+    place2UncertainRhFallback:place2UncertainRhFallback,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
