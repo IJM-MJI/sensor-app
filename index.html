@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Place-2 response6 RH v35</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Place-2 response6 RH v36</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.31-place2-response6-RH-v35';
+var APP_VERSION='2026.08.31-place2-response6-RH-v36';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -830,12 +830,15 @@ doClassify=function(f){
   var response6Profile=calibrated&&isFinite(BL.top_a)&&
     BL.top_a>=127.5&&BL.top_a<129.5;
   var response6LowRecovered=false;
-  // A negative concentration projection cannot represent a positive H2
-  // response. Within the response6 calibration profile it is the confirmed
-  // 9.5 s low-RH transition. Keep the recovery gate deliberately independent
-  // of the forest probability sums, which were the unstable part of v33/v34.
-  var response6LowSignature=response6Profile&&
-    isFinite(rawH2Diagnostic)&&rawH2Diagnostic<-1.0;
+  // The copied v35 diagnostic established the signed value unambiguously:
+  // rawH2=+1.71 (not -1.71 as first read from the small screenshot). Combine
+  // that weak projection with the confirmed low-RH prototype, RH-dominant
+  // state evidence and small flame shift. The calibration-profile gate keeps
+  // this response6 recovery separate from genuine environment-A H2 frames.
+  var response6LowSignature=response6Profile&&rhEndpointShadow&&
+    rhEndpointShadow.text==='20–30'&&rhp>h2p&&h2Expertp!=null&&h2Expertp<.50&&
+    isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=1.2&&rawH2Diagnostic<=2.2&&
+    flameShift>=.9&&flameShift<=1.8;
   if(uncertain&&response6LowSignature){
     uncertain=false;state='initial';h2=false;rh=false;
     h2SimPending=false;rhSimPending=false;response6LowRecovered=true;
