@@ -119,6 +119,8 @@ run 3을 run 4/5보다 낮게 평가한 사용자 품질 순서도 별도 가중
 
 `1_90_H2_only_5_cropped.mp4`를 포함한 최신 H2 crop 평가는 정확 단계 43.3%, ±1단계 95.5%, MAE 0.61%p입니다. RH20 simultaneous 네 run은 H2 0%/4% endpoint와 낮은 가중치의 내부 순서 정보로만 훈련에 추가하고 기존 H2-only 다섯 run에서만 평가합니다. 이 weak-data A/B는 정확 46.2%, stage-balanced 44.6%, ±1단계 97.5%, MAE 0.56%p로 큰 오차를 줄였지만 정확도와 stage-balanced가 함께 개선되지 않아 배포하지 않았습니다. 실제 픽셀 마스크를 읽는 방법과 발견된 RH 배경 혼입은 [`training/ENDPOINT_MASK_REVIEW_GUIDE.md`](training/ENDPOINT_MASK_REVIEW_GUIDE.md)에 설명했습니다.
 
+RH 근거를 원본 영상 기준으로 다시 분리한 결과는 [`training/RH_ORIGINAL_VIDEO_EVIDENCE.md`](training/RH_ORIGINAL_VIDEO_EVIDENCE.md)에 기록했습니다. 장소 2 complete-run holdout exact는 0.444이고 인접 한 구간 이내는 0.889입니다. profile별 3-frame 개발 검증 8/8은 같은 run의 선택 지점이며 30–40%가 없으므로 독립 정확도로 합치지 않습니다. 모니터 재촬영과 `Load saved frame` 점검도 최종 confusion matrix에서 제외합니다.
+
 기울어진 response 영상에서 불꽃 하단이 물방울 마스크에 들어가던 오류는 두 검색 영역의 경계를 실제 도형 사이 빈 공간으로 이동해 수정했습니다. 수정 후 H2 whole-video held-out은 정확 44.5%, stage-balanced 48.5%, ±1단계 96.2%, MAE 0.60%p로 모두 개선됐습니다.
 
 RH 카드 배경 제거 A/B에서는 색 거리 상위 15% 마스크가 저농도 신호까지 제거해 실패했습니다. 고정 물방울 템플릿은 exact 22.5%로 기존 23.8%보다 낮았지만 ±1단계 46.5%, MAE 17.00%p로 큰 오차를 줄였습니다. 두 특징의 단순 결합과 예측 앙상블도 exact/balanced를 함께 높이지 못했습니다.

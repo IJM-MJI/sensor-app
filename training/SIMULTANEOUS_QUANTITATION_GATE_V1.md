@@ -58,3 +58,10 @@ H2 stage anchors within the reaction interval (at least the video times at which
 0, 1, 2, 3, and 4% are reached). Without those anchors, existing videos support
 state classification and endpoint diagnostics, but not intermediate H2
 concentration truth.
+
+`make_simultaneous_anchor_template.py` generates
+`simultaneous_stage_anchors.csv` for all 28 RH20--80 clips in runs 2--5. Known
+reaction start/end times prefill the 0%/4% columns; 1%/2%/3% stay intentionally
+blank until the experiment log or human video review supplies them. They must
+not be filled by linear interpolation, because response lag is one of the
+effects this evaluation is meant to measure.
