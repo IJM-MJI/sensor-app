@@ -123,6 +123,8 @@ RH 근거를 원본 영상 기준으로 다시 분리한 결과는 [`training/RH
 
 7구간 RH의 프레임 시점 정책 9개를 같은 complete-run holdout으로 비교한 결과는 [`training/RH_PLACE2_TIMING_POLICY_AUDIT.md`](training/RH_PLACE2_TIMING_POLICY_AUDIT.md)에 기록했습니다. 가장 늦은 후보 시점에서 직전 3프레임을 취한 정책이 최선이었지만 exact/balanced는 0.643, 인접 한 구간 이내는 0.929였고 50–60% recall은 0.00이었습니다. 시간 선택만으로 exact 0.85를 만들 수 없으므로 앱에는 배포하지 않고 새 독립 run의 사전 고정 후보로만 유지합니다.
 
+다른 영상인 daylight `1_90_H2O_only.MOV`의 RH90→20 recovery를 frozen Place-2 모델로 외부검증한 결과는 [`training/RH_DAYLIGHT_RECOVERY_EXTERNAL_VALIDATION.md`](training/RH_DAYLIGHT_RECOVERY_EXTERNAL_VALIDATION.md)에 기록했습니다. single과 직전 3프레임 모두 exact/balanced 0.286, 인접 한 구간 이내 0.857이었으며 대부분 한 구간 낮게 예측됐습니다. calibration `top_a≈118.8`은 response3/6 profile router 범위 밖이므로, 이 결과는 새 환경과 하강 recovery의 전이 실패를 보여주며 앱 threshold에는 반영하지 않습니다.
+
 기울어진 response 영상에서 불꽃 하단이 물방울 마스크에 들어가던 오류는 두 검색 영역의 경계를 실제 도형 사이 빈 공간으로 이동해 수정했습니다. 수정 후 H2 whole-video held-out은 정확 44.5%, stage-balanced 48.5%, ±1단계 96.2%, MAE 0.60%p로 모두 개선됐습니다.
 
 RH 카드 배경 제거 A/B에서는 색 거리 상위 15% 마스크가 저농도 신호까지 제거해 실패했습니다. 고정 물방울 템플릿은 exact 22.5%로 기존 23.8%보다 낮았지만 ±1단계 46.5%, MAE 17.00%p로 큰 오차를 줄였습니다. 두 특징의 단순 결합과 예측 앙상블도 exact/balanced를 함께 높이지 못했습니다.
