@@ -73,6 +73,8 @@ H2-only 타임라인의 각 구간 끝은 해당 농도에 도달한 시점입�
 
 안정 구간으로 response3/response6 분리형 RH 모델도 검증했습니다. ±0.5초 중앙값 입력은 8/8을 맞혔지만 실제 앱과 같은 단일 사진 입력은 0.750이고, response3 26.5초가 60–70%에서 20–30%로 튀어 바깥 구간 정확도가 0.800이었습니다. 즉 안정 프로토타입은 유효하지만 단일 프레임 이상치가 남아 있어 앱은 변경하지 않았습니다. 상세 결과는 `training/rh_place2_profile_stable_model.py`와 `training/RH_PLACE2_PROFILE_STABLE_MODEL.md`에 기록합니다.
 
+단일 프레임 이상치를 줄이기 위해 즉시 3프레임 중앙값 촬영을 검증하고 앱에 적용했습니다. 30 fps 기준 3프레임은 약 66.7 ms이며, 단일 프레임 0.750에서 3프레임과 5프레임 모두 1.000으로 개선되어 더 짧은 3프레임을 채택했습니다. 기존 3–5초 누적 방식과 달리 체감 대기와 손떨림 영향을 최소화합니다. 상세 결과는 `training/rh_place2_microburst_validation.py`와 `training/RH_PLACE2_MICROBURST_VALIDATION.md`에 기록합니다.
+
 RH는 20%와 30%를 하나의 `20–30%` 구간으로 합치고 40–90%는 10% 단위로 유지합니다. 모든 video-held-out 평가는 테스트 영상의 0% calibration만 허용하고 그 영상의 나머지 프레임 전체를 학습에서 제외하는 `calibration-aware video-held-out`입니다. H2 정량 평가는 Reaction만 사용하며 정확도 46.1%(stage-balanced 48.8%, ±1% 이내 87.5%, MAE 0.67%p)입니다. RH endpoint ramp와 최종 RH20 calibration을 적용한 정확도는 36.9%(stage-balanced 35.0%, MAE 12.27%p), 동일 run 5초 블록은 정확도 52.1%(stage-balanced 52.1%, MAE 6.24%p)입니다. 선택된 전체 단계 모델은 `sensor-concentration-model.js`로 내보내며 Python 원본과 내보낸 트리/선형식의 예측 오차가 1e-9 이하인지 생성 시 자동 검사합니다.
 
 H2의 긴 4% hold가 전체 점수를 부풀리는지 확인하기 위해 Reaction과 Recovery를 별도로 평가합니다. 회전 정렬된 불꽃 마스크에서 chroma 10/25/50/75/90 백분위수를 추가한 Reaction 전용 calibration-aware 모델은 정확도 46.1%, stage-balanced 48.8%, ±1% 이내 87.5%, MAE 0.67%p입니다. H2 1%와 2% 재현율은 각각 44.6%, 65.4%이며, 동일 run 5초 블록은 정확도 46.8%, MAE 0.57%p입니다. 모든 분포 통계를 넣으면 영상 질감에 과적합했기 때문에 held-out으로 확인된 chroma 백분위수만 유지합니다. Recovery는 독립 run이 두 개뿐이고 여전히 정량 성능이 부족해 모델에 합치지 않습니다. 단일 사진 앱에는 검증된 Reaction 모델만 후보로 두고, Recovery는 별도 상태 또는 불확실 결과로 취급합니다.

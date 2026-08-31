@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Place-2 RH ordinal v37</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Immediate 3-frame median v38</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.31-place2-RH-ordinal-v37';
+var APP_VERSION='2026.08.31-immediate-3-frame-median-v38';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -1217,7 +1217,34 @@ document.addEventListener('visibilitychange',function(){if(!document.hidden) res
 window.addEventListener('pageshow',function(){resumeCam();});
 window.addEventListener('focus',function(){resumeCam();});
 
-function capture(){
+function waitForVideoFrame(){
+  return new Promise(function(resolve){
+    if(typeof vid.requestVideoFrameCallback==='function'){
+      vid.requestVideoFrameCallback(function(){resolve();});
+    }else{
+      // 30 fps fallback. This is still below 0.1 s for a three-frame burst.
+      setTimeout(resolve,34);
+    }
+  });
+}
+function snapshotVideoFrame(width,height){
+  ctx2d.globalAlpha=1.0;
+  ctx2d.drawImage(vid,0,0,width,height);
+  return new Uint8ClampedArray(ctx2d.getImageData(0,0,width,height).data);
+}
+function writeThreeFrameMedian(frames,width,height){
+  var output=ctx2d.createImageData(width,height),dst=output.data;
+  var first=frames[0],second=frames[1],third=frames[2];
+  for(var i=0;i<dst.length;i+=4){
+    for(var channel=0;channel<3;channel++){
+      var a=first[i+channel],b=second[i+channel],c=third[i+channel];
+      dst[i+channel]=a+b+c-Math.min(a,b,c)-Math.max(a,b,c);
+    }
+    dst[i+3]=255;
+  }
+  ctx2d.putImageData(output,0,0);
+}
+async function capture(){
   if(captured||!camReady) return;
   if(!calibrated&&!calMode){
     document.getElementById('dbg').textContent='Calibrate first at RH 20%, H2 0%';
@@ -1229,13 +1256,24 @@ function capture(){
   document.getElementById('shutterBtn').classList.add('hidden');
   document.getElementById('procOverlay').classList.remove('hidden');
   cvs.width=vw; cvs.height=vh;
-  // Freeze one frame immediately. Multi-second averaging blurred the fixed
-  // flame/drop ROIs when the phone moved between frames.
+  // Three newly presented frames span about 67 ms at 30 fps. Their per-pixel
+  // median rejects isolated exposure/compression outliers without returning
+  // to the multi-second accumulation that blurred ROIs under hand movement.
   var procText=document.getElementById('procText');
-  if(procText) procText.textContent='Analyzing photo...';
-  ctx2d.globalAlpha=1.0;
-  ctx2d.drawImage(vid,0,0);
-  finishCapture();
+  if(procText) procText.textContent='Capturing photo...';
+  try{
+    var frames=[snapshotVideoFrame(vw,vh)];
+    await waitForVideoFrame();frames.push(snapshotVideoFrame(vw,vh));
+    await waitForVideoFrame();frames.push(snapshotVideoFrame(vw,vh));
+    writeThreeFrameMedian(frames,vw,vh);
+    if(procText) procText.textContent='Analyzing photo...';
+    finishCapture();
+  }catch(error){
+    captured=false;
+    document.getElementById('procOverlay').classList.add('hidden');
+    if(calibrated)document.getElementById('shutterBtn').classList.remove('hidden');
+    document.getElementById('dbg').textContent='Burst capture error: '+error.message;
+  }
 }
 function openTestImage(){
   if(captured)retake();
