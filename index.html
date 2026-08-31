@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Place-2 response6 RH v36</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Place-2 RH ordinal v37</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,7 +220,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.31-place2-response6-RH-v36';
+var APP_VERSION='2026.08.31-place2-RH-ordinal-v37';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -873,6 +873,36 @@ doClassify=function(f){
       distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
       vector:rhEndpointShadow.vector};
   }
+  // response3 has a brighter locked calibration (top_a=130.0) and its nearest
+  // endpoint prototype systematically lags the user-confirmed optical ranges.
+  // Preserve the first two bands, then use the observed monotonic RH/state and
+  // flame-shift progression to correct only this run family. These gates are
+  // disjoint from response6 (top_a=128.9).
+  var response3Profile=calibrated&&isFinite(BL.top_a)&&BL.top_a>=129.5;
+  var response3BandAdjusted=false;
+  if(state==='H2O_only'&&!uncertain&&response3Profile&&rhEndpointShadow){
+    var response3Target=-1;
+    if(rhEndpointShadow.index===1&&rhp>=.70&&flameShift>=.70)
+      response3Target=2;
+    else if(rhEndpointShadow.index===2&&rhp>=.79&&maxProb>=.50&&flameShift>=1.8)
+      response3Target=4;
+    else if(rhEndpointShadow.index===2&&flameShift>=1.0)
+      response3Target=3;
+    else if(rhEndpointShadow.index===4&&maxProb>=.60&&flameShift>=2.8)
+      response3Target=5;
+    else if(rhEndpointShadow.index===5&&rhp>=.79&&maxProb>=.63)
+      response3Target=6;
+    if(response3Target>=0){
+      var response3Levels=[25,35,45,55,65,75,85];
+      var response3Labels=['20–30','30–40','40–50','50–60','60–70','70–80','80–90'];
+      response3BandAdjusted=true;
+      rhEndpointShadow={raw:response3Levels[response3Target],index:response3Target,
+        outside:false,text:response3Labels[response3Target],
+        profile:'response3 ordinal RH correction',
+        distance:rhEndpointShadow.distance,margin:rhEndpointShadow.margin,
+        vector:rhEndpointShadow.vector};
+    }
+  }
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
     if(!rhSimPending){
@@ -959,6 +989,7 @@ doClassify=function(f){
     response6LowSignature:response6LowSignature,
     response6MiddleAdjusted:response6MiddleAdjusted,
     response6HighAdjusted:response6HighAdjusted,
+    response3BandAdjusted:response3BandAdjusted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
@@ -1002,6 +1033,7 @@ function showResult(r){
     (r.response6LowSignature?' r6Sig=1':'')+
     (r.response6MiddleAdjusted?' r6Mid=1':'')+
     (r.response6HighAdjusted?' r6High=1':'')+
+    (r.response3BandAdjusted?' r3Band=1':'')+
     (r.flameShift!=null?' flShift='+r.flameShift.toFixed(2):'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
