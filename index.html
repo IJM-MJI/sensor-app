@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Immediate 3-frame median v38</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Stable-profile RH + 3-frame v39</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -215,12 +215,13 @@ body{
 <script src="sensor-concentration-model.js?v=20260819-1"></script>
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-rh-place2-seven-band-model.js?v=20260828-1"></script>
+<script src="sensor-rh-place2-stable-profile-model.js?v=20260831-1"></script>
 <script src="sensor-state-model.js?v=20260825-5"></script>
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.31-immediate-3-frame-median-v38';
+var APP_VERSION='2026.08.31-stable-profile-RH-3-frame-v39';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -625,6 +626,40 @@ function place2EndpointRhBand(model,f){
     profile:model.profile,distance:bestDistance,margin:secondDistance-bestDistance,vector:values,
     brightnessOnly:brightnessOnly};
 }
+function place2StableProfileRhBand(f){
+  var model=window.SENSOR_RH_PLACE2_STABLE_PROFILE_MODEL;
+  if(!model||model.type!=='profile_standardized_1nn'||
+      !calibrated||!isFinite(BL.top_a))return null;
+  var profileName=BL.top_a>=129.5?'response3':
+    (BL.top_a>=127.5?'response6':null);
+  var profile=profileName&&model.profiles[profileName];
+  if(!profile)return null;
+  var channels=['L','a','b'],values=[];
+  for(var j=0;j<channels.length;j++){
+    var ch=channels[j],drop='rh_tight_drop_'+ch,substrate='rh_near_substrate_'+ch;
+    if(!isFinite(f[drop])||!isFinite(f[substrate])||
+        !isFinite(BL[drop])||!isFinite(BL[substrate]))return null;
+    values.push((f[drop]-f[substrate])-(BL[drop]-BL[substrate]));
+  }
+  var best=-1,bestDistance=Infinity,secondDistance=Infinity;
+  for(var i=0;i<profile.prototypes.length;i++){
+    var distance=0;
+    for(var j=0;j<values.length;j++){
+      var delta=(values[j]-profile.prototypes[i][j])/
+        Math.max(profile.scaler_scale[j],1e-9);
+      distance+=delta*delta;
+    }
+    distance=Math.sqrt(distance/values.length);
+    if(distance<bestDistance){secondDistance=bestDistance;bestDistance=distance;best=i;}
+    else if(distance<secondDistance)secondDistance=distance;
+  }
+  if(best<0)return null;
+  return{raw:model.levels[best],index:best,outside:false,
+    text:model.display_levels[best],
+    profile:profileName+' stable-window burst3 1NN',
+    distance:bestDistance,margin:secondDistance-bestDistance,vector:values,
+    stableProfile:true,profileName:profileName};
+}
 doClassify=function(f){
   var sv=stateFeatures(SENSOR_STATE_MODEL,f);
   var stateProb=multiclassForestProb(SENSOR_STATE_MODEL,sv);
@@ -657,6 +692,7 @@ doClassify=function(f){
     window.SENSOR_RH_PLACE2_ENDPOINT_MODEL;
   if(calibrated&&place2RhModel)
     rhEndpointShadow=place2EndpointRhBand(place2RhModel,f);
+  var rhStableProfileShadow=place2StableProfileRhBand(f);
   // A low-RH monitor frame can be darker than calibration while showing no
   // chromatic gas response. App-domain v9 repeats separated genuine H2
   // endpoints (rawH2 0.25, 1.47, 3.44, 5.25) from the two RH-only errors
@@ -903,6 +939,12 @@ doClassify=function(f){
         vector:rhEndpointShadow.vector};
     }
   }
+  // The validated model is profile-specific and was measured with the same
+  // immediate three-frame median now used by the camera. It takes precedence
+  // over legacy single-frame correction rules, which otherwise shift middle
+  // ranges by one band after the stable model has already selected a class.
+  if(state==='H2O_only'&&!uncertain&&rhStableProfileShadow)
+    rhEndpointShadow=rhStableProfileShadow;
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
     if(!rhSimPending){
@@ -963,6 +1005,7 @@ doClassify=function(f){
   // display label/index to stay independent of model serialization details.
   var place2FinalHighOutputPromoted=false;
   if(state==='H2O_only'&&!uncertain&&calibrated&&rhQuant&&
+      !rhQuant.stableProfile&&
       isFinite(rhQuant.raw)&&rhQuant.raw>=70&&rhQuant.raw<80&&
       isFinite(BL.top_a)&&BL.top_a>=127&&rhp>=.83&&maxProb>=.70&&
       flameShift>=3.4){

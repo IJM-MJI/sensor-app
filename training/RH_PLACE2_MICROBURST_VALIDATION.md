@@ -39,6 +39,16 @@ This applies to live camera calibration and measurement. `Load saved frame`
 still evaluates the selected image once because a single image contains no
 adjacent frames.
 
+The first live-app audit of v38 preserved all three H2 checkpoints. For RH it
+scored 4/7 exact and 7/7 within one adjacent range: response3 26.5 s and
+response6 15.5/19 s were each one range low. This exposed an implementation
+gap: v38 used the new burst capture with the old global RH model, whereas the
+8/8 validation above used both the burst and profile-specific stable
+prototypes. v39 therefore exports those prototypes to
+`sensor-rh-place2-stable-profile-model.js` and selects response3/response6
+from the calibration `top_a`. The selected stable result takes precedence
+over legacy single-frame band corrections.
+
 ## Limitations and next gate
 
 The offline validation uses adjacent frames from monitor/video recordings, not
@@ -46,4 +56,3 @@ a live handheld phone burst. The next gate is therefore an app test using the
 camera shutter on response3 and response6 playback. The result must confirm
 that the ~67 ms burst does not cause visible ROI displacement and preserves
 the H2-only results before it is considered final.
-

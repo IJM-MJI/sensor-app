@@ -71,6 +71,8 @@ def main():
         r"C:\Users\Administrator\Downloads\dual_sensor\dual_sensor\recordings\1"))
     parser.add_argument("--output", type=Path, default=Path(
         "training/output/rh_place2_microburst_validation_v1"))
+    parser.add_argument("--app-model", type=Path, default=Path(
+        "sensor-rh-place2-stable-profile-model.js"))
     args = parser.parse_args(); args.output.mkdir(parents=True, exist_ok=True)
     cached = read_csv(args.cache)
     fps = {group: video_fps(args.video_root, video)
@@ -157,6 +159,26 @@ def main():
     }
     (args.output / "metrics.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    app_model = {
+        "version": "2026-08-31-place2-stable-profile-burst3-v1",
+        "type": "profile_standardized_1nn",
+        "levels": LEVELS.tolist(),
+        "display_levels": LABELS,
+        "input": "three-frame RGB median, then calibrated droplet-substrate LAB delta",
+        "profiles": {
+            group: {
+                "calibration_top_a": 130.0 if group == "response3" else 128.9,
+                "prototypes": train[group].tolist(),
+                "scaler_scale": np.maximum(np.std(train[group], axis=0), .5).tolist(),
+                "stable_centres_s": list(STABLE[group]),
+            }
+            for group in VIDEOS
+        },
+    }
+    args.app_model.write_text(
+        "window.SENSOR_RH_PLACE2_STABLE_PROFILE_MODEL=" +
+        json.dumps(app_model, ensure_ascii=False, separators=(",", ":")) + ";\n",
+        encoding="utf-8")
     with (args.output / "predictions.csv").open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
