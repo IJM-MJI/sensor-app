@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.09.01 · Crop-safe ROI + 3-frame v40</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.09.01 · Scale-aware ROI + 3-frame v41</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -221,7 +221,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.09.01-crop-safe-ROI-v40';
+var APP_VERSION='2026.09.01-scale-aware-ROI-v41';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -708,6 +708,24 @@ doClassify=function(f){
     Math.abs(shadowVector[1])<=shadowLimit&&Math.abs(shadowVector[2])<=shadowLimit;
   var rawH2Diagnostic=h2Diagnostic&&h2Diagnostic.raw;
   var lowRhEndpoint=rhEndpointShadow&&rhEndpointShadow.text==='20–30';
+  // The four-state forest can emit "simultaneous" from two weak, nearly tied
+  // votes. That is not enough evidence to claim two physical responses. Keep a
+  // weak simultaneous label only when the independent flame expert and H2
+  // projection also confirm H2. Otherwise retain dominant RH evidence or ask
+  // for a retake instead of reporting a false simultaneous response.
+  var weakSimultaneousBlocked=false;
+  if(state==='simultaneous'&&(maxProb<.55||gap<.12)){
+    var independentH2Confirmed=h2Expertp!=null&&h2Expertp>=.45&&
+      isFinite(rawH2Diagnostic)&&rawH2Diagnostic>=.50;
+    if(!independentH2Confirmed){
+      weakSimultaneousBlocked=true;h2=false;h2SimPending=false;rhSimPending=false;
+      if(rhp>=.55&&rhp>=h2p+.06){
+        uncertain=false;state='H2O_only';rh=true;
+      }else{
+        uncertain=true;state='undecided';rh=false;
+      }
+    }
+  }
   var opticallyNoH2=isFinite(rawH2Diagnostic)&&
     rawH2Diagnostic>=-3.0&&rawH2Diagnostic<=0.10;
   var lowConfidenceH2Candidate=uncertain||
@@ -1021,6 +1039,7 @@ doClassify=function(f){
     h2Diagnostic:h2Diagnostic,h2Expertp:h2Expertp,
     lowResponseRecovered:lowResponseRecovered,lowH2Promoted:lowH2Promoted,
     h2ConsensusPromoted:h2ConsensusPromoted,flameShift:flameShift,
+    weakSimultaneousBlocked:weakSimultaneousBlocked,
     place2RhOnlyRecovered:place2RhOnlyRecovered,
     place2MiddleRhRecovered:place2MiddleRhRecovered,
     place2EarlyMiddleRhRecovered:place2EarlyMiddleRhRecovered,
@@ -1550,7 +1569,7 @@ function detectAndClassify(src){
     bCx=0;bCy=0;bR=0;bBr=-1;
     var frameRatio=Math.max(w,h)/Math.max(Math.min(w,h),1);
     var tightCrop=frameRatio<1.35;
-    var outerCandidate=null,outerDistance=1e9;
+    var outerCandidate=null,outerDistance=1e9,compactCandidate=null;
     for(var i=0;i<circles.cols;i++){
       var cx=Math.round(circles.data32F[i*3]);
       var cy=Math.round(circles.data32F[i*3+1]);
@@ -1561,7 +1580,7 @@ function detectAndClassify(src){
       // before scoring and, critically, before saving a calibration anchor.
       // Bounds cover both full-camera and tightly cropped saved frames.
       var centralWindow=nx>=(tightCrop?.18:.24)&&nx<=(tightCrop?.82:.76)&&
-        ny>=(tightCrop?.10:.15)&&ny<=(tightCrop?.78:.65)&&nr>=.20&&nr<=.60;
+        ny>=(tightCrop?.10:.15)&&ny<=(tightCrop?.78:.65)&&nr>=.13&&nr<=.60;
       if(!centralWindow)continue;
       nValidCircles++;
       // Near-square exported frames show the whole metal flange.  Hough often
@@ -1599,11 +1618,12 @@ function detectAndClassify(src){
       // below.  A false circle centred on the flame has high colour coverage
       // but almost no lower-shape support.  Measure both halves over most of
       // the candidate aperture, independently of the compact colour score.
-      var pairR=Math.round(r*.90),upperWarm=0,lowerWarm=0,pairWarm=0;
+      var pairR=Math.round(r*.90),upperWarm=0,lowerWarm=0,pairWarm=0,pairSamples=0;
       for(var pdy=-pairR;pdy<=pairR;pdy+=3){
         for(var pdx=-pairR;pdx<=pairR;pdx+=3){
           var ppx=cx+pdx,ppy=cy+pdy;
           if(ppx>=0&&ppx<w&&ppy>=0&&ppy<h&&pdx*pdx+pdy*pdy<=pairR*pairR){
+            pairSamples++;
             var psi=(ppy*selCols+ppx)*3;
             var psa=selData[psi+1]-128,psb=selData[psi+2]-128;
             if(Math.sqrt(psa*psa+psb*psb)>15&&selData[psi+2]>133){
@@ -1615,6 +1635,7 @@ function detectAndClassify(src){
         }
       }
       var pairBalance=Math.min(upperWarm,lowerWarm)/Math.max(pairWarm,1);
+      var pairCoverage=pairWarm/Math.max(pairSamples,1);
       var centerDx=(nx-.50)/.30,centerDy=(ny-.43)/.30;
       var centerPrior=Math.exp(-.5*(centerDx*centerDx+centerDy*centerDy));
       // Prefer the inner optical aperture (normally near 0.30 of the short
@@ -1625,8 +1646,22 @@ function detectAndClassify(src){
       var score=(coverage+0.05*Math.min(span,1.8))*Math.sqrt(nr)+
         .08*centerPrior+.10*radiusPrior+.35*pairBalance+.08*apertureCenterPrior;
       if(score>bScore){bScore=score;bBr=avg;bCx=cx;bCy=cy;bR=r;}
+      // In an uncropped 4:3 frame the real optical aperture is small, while a
+      // partial arc made by the plate and plumbing can look like a huge circle.
+      // A genuine compact aperture still contains warm pixels in both the
+      // flame (upper) and droplet (lower) halves. Prefer that evidence over the
+      // aspect-ratio heuristic; 4:3 alone does not mean the chamber was cropped.
+      if(nr<=.22&&ny<=.55&&pairBalance>=.12&&pairCoverage>=.018){
+        var compactScore=score+.65*pairCoverage+.20*pairBalance;
+        if(!compactCandidate||compactScore>compactCandidate.score)
+          compactCandidate={cx:cx,cy:cy,r:r,score:compactScore,brightness:avg};
+      }
     }
-    if(tightCrop&&outerCandidate){
+    if(compactCandidate){
+      bCx=compactCandidate.cx;bCy=compactCandidate.cy;bR=compactCandidate.r;
+      bBr=compactCandidate.brightness;bScore=compactCandidate.score;
+      roiSource='compact-aperture';
+    }else if(tightCrop&&outerCandidate){
       // Regularize noisy/partial outer-ring Hough centres toward the observed
       // tight-crop chamber layout.  The optical aperture is about 75% of the
       // flange radius and about 40% of the short image side.
@@ -2030,8 +2065,9 @@ function drawDebugOverlay(r){
   var src=g.roiSource==='manual'?'Manual ROI':
     (g.roiSource==='calibration-lock'?'Calibration ROI locked':
       (g.roiSource==='tight-crop-aperture'?'Tight-crop aperture':
-        (g.roiSource==='auto-reframed'?'ROI re-detected (new crop)':
-          'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central')));
+        (g.roiSource==='compact-aperture'?'Compact optical aperture':
+          (g.roiSource==='auto-reframed'?'ROI re-detected (new crop)':
+            'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central'))));
   dx.fillStyle='#fff';dx.fillText(src,10,20);
   dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness
     +(g.chromaScore===null?'':' chroma='+g.chromaScore+'%'),10,36);
