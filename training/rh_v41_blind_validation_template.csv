@@ -1,0 +1,8 @@
+run,crop_mode,time_s,reference_rh,reference_band,predicted_state,predicted_band,pRH,pState,roi_source,roi_geometry_pass,false_simultaneous
+run1,uncropped,13,25,20-30,,,,,,,0
+run1,uncropped,14,25,20-30,,,,,,,0
+run1,uncropped,15,25,20-30,,,,,,,0
+run1,uncropped,16,25,20-30,,,,,,,0
+run1,uncropped,17,25,20-30,,,,,,,0
+run1,uncropped,18,25,20-30,,,,,,,0
+run1,uncropped,19,25,20-30,,,,,,,0
