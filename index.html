@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.08.31 · Stable-profile RH + 3-frame v39</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.09.01 · Crop-safe ROI + 3-frame v40</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -221,7 +221,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.08.31-stable-profile-RH-3-frame-v39';
+var APP_VERSION='2026.09.01-crop-safe-ROI-v40';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -263,7 +263,8 @@ function saveCal(feat){
     x:feat._dropRegistration.x,y:feat._dropRegistration.y,angle:feat._dropRegistration.angle
   }:null;
   circleRegistration=feat._circleRegistration?{
-    cx:feat._circleRegistration.cx,cy:feat._circleRegistration.cy,r:feat._circleRegistration.r
+    cx:feat._circleRegistration.cx,cy:feat._circleRegistration.cy,r:feat._circleRegistration.r,
+    aspect:feat._circleRegistration.aspect
   }:null;
   h2Environment=feat._h2Environment||null;
   h2EnvironmentScore=isFinite(feat._h2EnvironmentScore)?feat._h2EnvironmentScore:null;
@@ -1486,6 +1487,14 @@ function detectAndClassify(src){
   var environmentFeatures=environmentHsvFeatures(src);
   var environmentRoute=routeH2Environment(environmentFeatures);
   var bCx,bCy,bR,nCircles=0,nValidCircles=0,bBr=255,roiSource='auto',bScore=-1;
+  var currentAspect=w/Math.max(h,1);
+  var registeredAspect=circleRegistration&&isFinite(circleRegistration.aspect)?
+    circleRegistration.aspect:currentAspect;
+  // A locked normalized circle is valid only while the image crop/aspect stays
+  // compatible with the calibration image.  Saved frames may be exported as
+  // portrait, landscape, or a tight near-square chamber crop.
+  var compatibleRegistration=!circleRegistration||
+    Math.abs(Math.log(currentAspect/Math.max(registeredAspect,1e-9)))<=.08;
 
   if(manualROI){
     // Manual ROI: fixed position
@@ -1494,7 +1503,7 @@ function detectAndClassify(src){
     bR=Math.round(manualROI.rPct/100*Math.min(h,w));
     nCircles=1;
     roiSource='manual';
-  }else if(calibrated&&circleRegistration){
+  }else if(calibrated&&circleRegistration&&compatibleRegistration){
     // Training extracts all endpoints in one run with a single locked chamber
     // circle. Re-running Hough made response3 use a different coordinate system
     // on every saved frame (observed y=172..231 and r=228..265), moving the
@@ -1539,6 +1548,9 @@ function detectAndClassify(src){
     var selData=selLab.data, selCols=selLab.cols;
 
     bCx=0;bCy=0;bR=0;bBr=-1;
+    var frameRatio=Math.max(w,h)/Math.max(Math.min(w,h),1);
+    var tightCrop=frameRatio<1.35;
+    var outerCandidate=null,outerDistance=1e9;
     for(var i=0;i<circles.cols;i++){
       var cx=Math.round(circles.data32F[i*3]);
       var cy=Math.round(circles.data32F[i*3+1]);
@@ -1548,9 +1560,23 @@ function detectAndClassify(src){
       // rim are circular too, but cannot be used as a colour ROI.  Reject them
       // before scoring and, critically, before saving a calibration anchor.
       // Bounds cover both full-camera and tightly cropped saved frames.
-      var centralWindow=nx>=.24&&nx<=.76&&ny>=.15&&ny<=.65&&nr>=.20&&nr<=.60;
+      var centralWindow=nx>=(tightCrop?.18:.24)&&nx<=(tightCrop?.82:.76)&&
+        ny>=(tightCrop?.10:.15)&&ny<=(tightCrop?.78:.65)&&nr>=.20&&nr<=.60;
       if(!centralWindow)continue;
       nValidCircles++;
+      // Near-square exported frames show the whole metal flange.  Hough often
+      // detects that stable outer ring but not the partially occluded optical
+      // aperture.  Remember the most central large ring; after the loop it is
+      // converted to the aperture geometry instead of letting the coloured
+      // flame create a smaller false circle.
+      if(tightCrop&&nr>=.43){
+        var outerDx=nx-.50,outerDy=ny-.52;
+        var outerD=Math.sqrt(outerDx*outerDx+outerDy*outerDy);
+        if(outerD<outerDistance){
+          outerDistance=outerD;
+          outerCandidate={cx:cx,cy:cy,r:r};
+        }
+      }
       var ir=Math.round(r*0.5);
       var sum=0,cnt=0,chromaCnt=0,minWarmY=1e9,maxWarmY=-1;
       for(var dy=-ir;dy<=ir;dy+=3){
@@ -1569,14 +1595,59 @@ function detectAndClassify(src){
       var avg=cnt>0?sum/cnt:0;
       var coverage=cnt>0?chromaCnt/cnt:0;
       var span=maxWarmY>=minWarmY?(maxWarmY-minWarmY)/Math.max(r,1):0;
+      // A valid chamber ROI contains the warm flame above and the main droplet
+      // below.  A false circle centred on the flame has high colour coverage
+      // but almost no lower-shape support.  Measure both halves over most of
+      // the candidate aperture, independently of the compact colour score.
+      var pairR=Math.round(r*.90),upperWarm=0,lowerWarm=0,pairWarm=0;
+      for(var pdy=-pairR;pdy<=pairR;pdy+=3){
+        for(var pdx=-pairR;pdx<=pairR;pdx+=3){
+          var ppx=cx+pdx,ppy=cy+pdy;
+          if(ppx>=0&&ppx<w&&ppy>=0&&ppy<h&&pdx*pdx+pdy*pdy<=pairR*pairR){
+            var psi=(ppy*selCols+ppx)*3;
+            var psa=selData[psi+1]-128,psb=selData[psi+2]-128;
+            if(Math.sqrt(psa*psa+psb*psb)>15&&selData[psi+2]>133){
+              pairWarm++;
+              if(pdy<-.08*r)upperWarm++;
+              else if(pdy>.08*r)lowerWarm++;
+            }
+          }
+        }
+      }
+      var pairBalance=Math.min(upperWarm,lowerWarm)/Math.max(pairWarm,1);
       var centerDx=(nx-.50)/.30,centerDy=(ny-.43)/.30;
       var centerPrior=Math.exp(-.5*(centerDx*centerDx+centerDy*centerDy));
       // Prefer the inner optical aperture (normally near 0.30 of the short
       // side), rather than the much larger outer metal flange in tight crops.
       var radiusPrior=Math.exp(-.5*Math.pow((nr-.30)/.14,2));
+      var apertureDx=(nx-.50)/.18,apertureDy=(ny-.48)/.22;
+      var apertureCenterPrior=Math.exp(-.5*(apertureDx*apertureDx+apertureDy*apertureDy));
       var score=(coverage+0.05*Math.min(span,1.8))*Math.sqrt(nr)+
-        .08*centerPrior+.10*radiusPrior;
+        .08*centerPrior+.10*radiusPrior+.35*pairBalance+.08*apertureCenterPrior;
       if(score>bScore){bScore=score;bBr=avg;bCx=cx;bCy=cy;bR=r;}
+    }
+    if(tightCrop&&outerCandidate){
+      // Regularize noisy/partial outer-ring Hough centres toward the observed
+      // tight-crop chamber layout.  The optical aperture is about 75% of the
+      // flange radius and about 40% of the short image side.
+      var side=Math.min(w,h);
+      bCx=Math.round(.75*(w*.50)+.25*outerCandidate.cx);
+      bCy=Math.round(.75*(h*.52)+.25*outerCandidate.cy);
+      bR=Math.round(.75*(side*.40)+.25*(outerCandidate.r*.75));
+      var brR=Math.max(2,Math.round(bR*.45)),brSum=0,brCount=0;
+      for(var by=-brR;by<=brR;by+=3){
+        for(var bx=-brR;bx<=brR;bx+=3){
+          var bpx=bCx+bx,bpy=bCy+by;
+          if(bpx>=0&&bpx<w&&bpy>=0&&bpy<h&&bx*bx+by*by<=brR*brR){
+            brSum+=gray.ucharAt(bpy,bpx);brCount++;
+          }
+        }
+      }
+      bBr=brCount?brSum/brCount:bBr;
+      bScore=1;
+      roiSource='tight-crop-aperture';
+    }else if(calibrated&&circleRegistration&&!compatibleRegistration){
+      roiSource='auto-reframed';
     }
     nCircles=circles.cols;
     circles.delete(); gray.delete(); selLab.delete();
@@ -1899,7 +1970,7 @@ function detectAndClassify(src){
     flame_chroma_p75:percentile(flameChroma,75),
     flame_chroma_p90:percentile(flameChroma,90),
     _dropRegistration:activeRegistration,
-    _circleRegistration:{cx:bCx/w,cy:bCy/h,r:bR/Math.min(h,w)},
+    _circleRegistration:{cx:bCx/w,cy:bCy/h,r:bR/Math.min(h,w),aspect:w/Math.max(h,1)},
     _h2Environment:environmentRoute?environmentRoute.family:null,
     _h2EnvironmentScore:environmentRoute?environmentRoute.score:null,
     _flameMaskRegistration:activeFlameMask,
@@ -1958,7 +2029,9 @@ function drawDebugOverlay(r){
   dx.fillRect(4,4,220,130);
   var src=g.roiSource==='manual'?'Manual ROI':
     (g.roiSource==='calibration-lock'?'Calibration ROI locked':
-      'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central');
+      (g.roiSource==='tight-crop-aperture'?'Tight-crop aperture':
+        (g.roiSource==='auto-reframed'?'ROI re-detected (new crop)':
+          'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central')));
   dx.fillStyle='#fff';dx.fillText(src,10,20);
   dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness
     +(g.chromaScore===null?'':' chroma='+g.chromaScore+'%'),10,36);
