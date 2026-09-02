@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.09.01 · Scale-aware ROI + 3-frame v41</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.09.02 · Cover-aligned ROI + 3-frame v42</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -221,7 +221,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.09.01-scale-aware-ROI-v41';
+var APP_VERSION='2026.09.02-cover-aligned-ROI-v42';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -1164,6 +1164,14 @@ function copyResult(){
 var manualROI=null; // {cx:0-1, cy:0-1, rPct:30} percentage-based
 var roiMode=false;
 
+function coverTransform(sourceWidth,sourceHeight,displayWidth,displayHeight){
+  var scale=Math.max(displayWidth/Math.max(sourceWidth,1),
+    displayHeight/Math.max(sourceHeight,1));
+  return{scale:scale,
+    offsetX:(displayWidth-sourceWidth*scale)/2,
+    offsetY:(displayHeight-sourceHeight*scale)/2};
+}
+
 function loadROI(){}
 
 function saveROI(){
@@ -1210,12 +1218,16 @@ function drawROIOverlay(){
   var oc=document.getElementById('roiOverlay');
   var wrap=document.getElementById('camWrap');
   var ww=wrap.clientWidth, wh=wrap.clientHeight;
-  oc.width=ww; oc.height=wh;
+  var dpr=window.devicePixelRatio||1;
+  oc.width=Math.round(ww*dpr); oc.height=Math.round(wh*dpr);
   oc.style.display='block';
   var ox=oc.getContext('2d');
+  ox.setTransform(dpr,0,0,dpr,0,0);
   ox.clearRect(0,0,ww,wh);
-  var cx=manualROI.cx*ww, cy=manualROI.cy*wh;
-  var r=manualROI.rPct/100*Math.min(ww,wh);
+  var fit=coverTransform(cvs.width,cvs.height,ww,wh);
+  var cx=manualROI.cx*cvs.width*fit.scale+fit.offsetX;
+  var cy=manualROI.cy*cvs.height*fit.scale+fit.offsetY;
+  var r=manualROI.rPct/100*Math.min(cvs.width,cvs.height)*fit.scale;
   ox.strokeStyle='rgba(0,255,0,0.8)';ox.lineWidth=2;
   ox.beginPath();ox.arc(cx,cy,r,0,Math.PI*2);ox.stroke();
   ox.strokeStyle='rgba(0,255,0,0.4)';ox.lineWidth=1;
@@ -1226,8 +1238,10 @@ function drawROIOverlay(){
 document.getElementById('roiGuide').addEventListener('click',function(e){
   if(!roiMode) return;
   var rect=this.getBoundingClientRect();
-  var x=(e.clientX-rect.left)/rect.width;
-  var y=(e.clientY-rect.top)/rect.height;
+  var fit=coverTransform(cvs.width,cvs.height,rect.width,rect.height);
+  var x=((e.clientX-rect.left)-fit.offsetX)/Math.max(fit.scale*cvs.width,1);
+  var y=((e.clientY-rect.top)-fit.offsetY)/Math.max(fit.scale*cvs.height,1);
+  x=Math.max(0,Math.min(1,x));y=Math.max(0,Math.min(1,y));
   var rVal=parseInt(document.getElementById('roiSlider').value);
   manualROI={cx:x,cy:y,rPct:rVal};
   saveROI();
@@ -2066,16 +2080,25 @@ function drawDebugOverlay(r){
   var inv=1/sc;
   var imgEl=document.getElementById('capturedImg');
   var dc=document.getElementById('dbgCvs');
-  dc.width=cvs.width; dc.height=cvs.height;
+  var wrap=document.getElementById('camWrap');
+  var displayWidth=wrap.clientWidth,displayHeight=wrap.clientHeight;
+  var dpr=window.devicePixelRatio||1;
+  dc.width=Math.round(displayWidth*dpr);dc.height=Math.round(displayHeight*dpr);
   dc.style.display='block';
   var dx=dc.getContext('2d');
-  dx.clearRect(0,0,dc.width,dc.height);
+  dx.setTransform(dpr,0,0,dpr,0,0);
+  dx.clearRect(0,0,displayWidth,displayHeight);
+  var fit=coverTransform(cvs.width,cvs.height,displayWidth,displayHeight);
+  var circleX=g.cx*inv*fit.scale+fit.offsetX;
+  var circleY=g.cy*inv*fit.scale+fit.offsetY;
+  var circleR=g.r*inv*fit.scale;
+  var innerCircleR=g.innerR*inv*fit.scale;
 
   // Draw detected circle (red) and inner circle (yellow)
   dx.strokeStyle='rgba(255,0,0,0.8)';dx.lineWidth=3;
-  dx.beginPath();dx.arc(g.cx*inv,g.cy*inv,g.r*inv,0,Math.PI*2);dx.stroke();
+  dx.beginPath();dx.arc(circleX,circleY,circleR,0,Math.PI*2);dx.stroke();
   dx.strokeStyle='rgba(255,255,0,0.7)';dx.lineWidth=2;
-  dx.beginPath();dx.arc(g.cx*inv,g.cy*inv,g.innerR*inv,0,Math.PI*2);dx.stroke();
+  dx.beginPath();dx.arc(circleX,circleY,innerCircleR,0,Math.PI*2);dx.stroke();
 
   // Legend and stats
   dx.font='bold 14px sans-serif';

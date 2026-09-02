@@ -55,7 +55,7 @@ H2 또는 RH 확률이 판정 임계값의 ±0.10 안에 있으면 앱은 상태
 
 Calibration 사진에서 검출한 원형 ROI는 정렬된 동일 run 안에서 정규화 좌표로 고정합니다. 다만 이후 사진의 종횡비가 크게 달라 crop 또는 회전 조건이 바뀐 것으로 판단되면 잠긴 원을 버리고 챔버를 다시 검출합니다. `Set ROI`를 사용한 경우에는 사용자가 지정한 ROI를 우선합니다. `1_90_H2O_only_2(_extract)`는 명목 RH 증가에 비해 물방울 색 변화가 약하고 안쪽/바깥쪽 원 검출이 번갈아 나타나므로 RH 정량 모델 경계 조정용 run에서는 제외 후보로 관리합니다.
 
-v41은 4:3에 가까운 uncropped 저장 프레임을 tight crop으로 오인하던 문제를 수정했습니다. 불꽃과 물방울을 함께 포함하는 작은 optical aperture를 우선하고, 독립 H2 근거가 없는 저신뢰 simultaneous 투표는 RH-only 또는 재촬영으로 제한합니다. cropped/uncropped 회귀 결과는 [`training/APP_ROI_V41_AUDIT.md`](training/APP_ROI_V41_AUDIT.md)에 기록했습니다.
+v41은 4:3에 가까운 uncropped 저장 프레임을 tight crop으로 오인하던 문제를 수정했습니다. 불꽃과 물방울을 함께 포함하는 작은 optical aperture를 우선하고, 독립 H2 근거가 없는 저신뢰 simultaneous 투표는 RH-only 또는 재촬영으로 제한합니다. cropped/uncropped 회귀 결과는 [`training/APP_ROI_V41_AUDIT.md`](training/APP_ROI_V41_AUDIT.md)에 기록했습니다. v42는 16:9 원본을 정사각형 `object-fit: cover`로 표시할 때 디버그/수동 ROI 원만 원본 전체 비율로 늘어나 왼쪽에 보이던 좌표계 불일치를 수정했습니다. 분류 ROI와 화면 원이 이제 같은 cover 변환을 사용합니다.
 
 v40 ROI 검출은 불꽃만 포함하는 작은 색 원을 배제하기 위해 위쪽 불꽃과 아래쪽 물방울의 동시 포함 점수를 사용합니다. near-square tight crop은 중앙 금속 외곽 링으로부터 optical aperture를 복원하고, calibration과 측정 이미지의 종횡비가 크게 달라지면 잠긴 ROI를 재사용하지 않고 다시 검출합니다. `app_test` tight-crop 9장과 cropped/uncropped 영상 calibration 6종의 geometry audit는 15/15를 통과했으며 상세 결과는 [`training/APP_ROI_V40_AUDIT.md`](training/APP_ROI_V40_AUDIT.md)에 기록했습니다.
 
