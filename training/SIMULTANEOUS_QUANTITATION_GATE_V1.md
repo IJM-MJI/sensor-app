@@ -44,14 +44,36 @@ This prevents a state-classification success from being presented as an
 unsupported quantitative result. Diagnostic raw values remain available to the
 developer trace for model development.
 
+### Confirmed simultaneous RH target (2026-09-02)
+
+The RH number embedded in `1_90_RHxx_<run>` is the simultaneous experiment
+setting, not the displayed concentration target.  Because H2 and humid flow are
+supplied together, the optical RH response can be lower than the corresponding
+RH-only experiment.  The deployed target is therefore the **RH-only-equivalent
+optical band**:
+
+- Compare the simultaneous droplet response with the reviewed RH-only colour
+  path and report one of 20--30, 30--40, ..., 80--90% RH.
+- Keep the filename RH only as grouping/diagnostic metadata.  It must not
+  supervise the reported RH class.
+- Condition the droplet estimate on flame features to remove H2 cross-talk.
+- Use a single frame.  Elapsed time and neighbouring-frame voting are not model
+  inputs.
+- Use the uncropped RH-labelled files directly.  The deployed scale-aware ROI
+  is responsible for locating the chamber and sensing card.
+
+Thus a nominal simultaneous `RH70` frame may correctly display, for example,
+`50--60% RH (RH-only equivalent)` when its corrected droplet colour matches that
+RH-only stage.
+
 ## Next modelling requirement
 
 The next model must estimate the two cross-interference terms jointly:
 
 1. H2 estimate from the flame after conditioning on the registered droplet
    response.
-2. H2O-only-equivalent RH from the droplet after conditioning on the registered
-   flame response.
+2. RH-only-equivalent seven-band RH from the droplet after conditioning on the
+   registered flame response.  Nominal simultaneous RH is not the label.
 
 For a genuine concentration confusion matrix, the simultaneous reaction needs
 H2 stage anchors within the reaction interval (at least the video times at which

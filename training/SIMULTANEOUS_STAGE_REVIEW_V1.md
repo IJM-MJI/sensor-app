@@ -40,6 +40,10 @@ For each row, identify the frames whose **flame** matches the reviewed H2-only
 assigned one of the seven reviewed H2O-only optical RH bands.  Nominal chamber
 RH remains metadata and does not replace that droplet review.
 
+All review images are decoded from the uncropped RH-labelled videos.  Chamber
+and card localization must therefore use the same scale-aware ROI principle as
+the deployed v41 app; crop coordinates are not training inputs.
+
 ## Training gate
 
 After review, train a two-output correction with run-wise holdout:
