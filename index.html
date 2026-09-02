@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.09.02 · Cover-aligned ROI + 3-frame v42</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.09.02 · Inner-aperture ROI + 3-frame v43</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -221,7 +221,7 @@ body{
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script>
-var APP_VERSION='2026.09.02-cover-aligned-ROI-v42';
+var APP_VERSION='2026.09.02-inner-aperture-ROI-v43';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -1602,7 +1602,7 @@ function detectAndClassify(src){
     bCx=0;bCy=0;bR=0;bBr=-1;
     var frameRatio=Math.max(w,h)/Math.max(Math.min(w,h),1);
     var tightCrop=frameRatio<1.35;
-    var outerCandidate=null,outerDistance=1e9,compactCandidate=null;
+    var outerCandidate=null,outerDistance=1e9,compactCandidate=null,wideOuterCandidate=null;
     for(var i=0;i<circles.cols;i++){
       var cx=Math.round(circles.data32F[i*3]);
       var cy=Math.round(circles.data32F[i*3+1]);
@@ -1684,16 +1684,35 @@ function detectAndClassify(src){
       // A genuine compact aperture still contains warm pixels in both the
       // flame (upper) and droplet (lower) halves. Prefer that evidence over the
       // aspect-ratio heuristic; 4:3 alone does not mean the chamber was cropped.
-      if(nr<=.22&&ny<=.55&&pairBalance>=.12&&pairCoverage>=.018){
-        var compactScore=score+.65*pairCoverage+.20*pairBalance;
+      if(nr<=.20&&ny<=(tightCrop?.55:.38)&&pairBalance>=.12&&pairCoverage>=.018){
+        // In wide uncropped recordings the inner optical aperture is normally
+        // about 0.15--0.18 of the short side. The former .30 radius prior let
+        // the concentric outer metal flange (about .21--.23) win on otherwise
+        // identical Run-3 frames.
+        var compactRadiusPrior=Math.exp(-.5*Math.pow((nr-.17)/.05,2));
+        var compactScore=score+.65*pairCoverage+.20*pairBalance+.35*compactRadiusPrior;
         if(!compactCandidate||compactScore>compactCandidate.score)
           compactCandidate={cx:cx,cy:cy,r:r,score:compactScore,brightness:avg};
+      }
+      if(!tightCrop&&nr>.20&&nr<=.28&&ny<=.38&&
+          pairBalance>=.12&&pairCoverage>=.018){
+        var wideOuterScore=score+.45*pairCoverage+.15*pairBalance;
+        if(!wideOuterCandidate||wideOuterScore>wideOuterCandidate.score)
+          wideOuterCandidate={cx:cx,cy:cy,r:r,score:wideOuterScore,brightness:avg};
       }
     }
     if(compactCandidate){
       bCx=compactCandidate.cx;bCy=compactCandidate.cy;bR=compactCandidate.r;
       bBr=compactCandidate.brightness;bScore=compactCandidate.score;
       roiSource='compact-aperture';
+    }else if(wideOuterCandidate){
+      // Hough sometimes returns only the outer flange. Its concentric optical
+      // aperture is consistently about 72% of that radius in the uncropped
+      // recordings, so convert it rather than extracting metal-ring pixels.
+      bCx=wideOuterCandidate.cx;bCy=wideOuterCandidate.cy;
+      bR=Math.round(wideOuterCandidate.r*.72);
+      bBr=wideOuterCandidate.brightness;bScore=wideOuterCandidate.score;
+      roiSource='wide-outer-derived-aperture';
     }else if(tightCrop&&outerCandidate){
       // Regularize noisy/partial outer-ring Hough centres toward the observed
       // tight-crop chamber layout.  The optical aperture is about 75% of the
@@ -2108,8 +2127,9 @@ function drawDebugOverlay(r){
     (g.roiSource==='calibration-lock'?'Calibration ROI locked':
       (g.roiSource==='tight-crop-aperture'?'Tight-crop aperture':
         (g.roiSource==='compact-aperture'?'Compact optical aperture':
-          (g.roiSource==='auto-reframed'?'ROI re-detected (new crop)':
-            'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central'))));
+          (g.roiSource==='wide-outer-derived-aperture'?'Wide outer → aperture':
+            (g.roiSource==='auto-reframed'?'ROI re-detected (new crop)':
+              'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central')))));
   dx.fillStyle='#fff';dx.fillText(src,10,20);
   dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness
     +(g.chromaScore===null?'':' chroma='+g.chromaScore+'%'),10,36);

@@ -44,7 +44,7 @@ def select_circle(frame):
     warm = (np.hypot(aa, bb) > 15) & (lab[:, :, 2] > 133)
     yy, xx = np.ogrid[:h, :w]
     tight = max(w, h) / side < 1.35
-    best = None; compact = None; outer = None
+    best = None; compact = None; outer = None; wide_outer = None
     for cx, cy, radius in circles:
         nx, ny, nr = cx / w, cy / h, radius / side
         xlo, xhi = ((.18, .82) if tight else (.24, .76))
@@ -79,12 +79,22 @@ def select_circle(frame):
                  .08 * center + .10 * radius_prior + .35 * balance + .08 * aperture)
         if best is None or score > best[0]:
             best = (score, cx, cy, radius)
-        if nr <= .22 and ny <= .55 and balance >= .12 and pair_coverage >= .018:
-            compact_score = score + .65 * pair_coverage + .20 * balance
+        if (nr <= .20 and ny <= (.55 if tight else .38)
+                and balance >= .12 and pair_coverage >= .018):
+            compact_radius = math.exp(-.5 * ((nr - .17) / .05) ** 2)
+            compact_score = score + .65 * pair_coverage + .20 * balance + .35 * compact_radius
             if compact is None or compact_score > compact[0]:
                 compact = (compact_score, cx, cy, radius)
+        if (not tight and .20 < nr <= .28 and ny <= .38 and balance >= .12
+                and pair_coverage >= .018):
+            wide_score = score + .45 * pair_coverage + .15 * balance
+            if wide_outer is None or wide_score > wide_outer[0]:
+                wide_outer = (wide_score, cx, cy, radius)
     if compact is not None:
         return frame, compact[1:], "compact-aperture"
+    if wide_outer is not None:
+        return frame, (wide_outer[1], wide_outer[2], round(wide_outer[3] * .72)), \
+            "wide-outer-derived-aperture"
     if tight and outer is not None:
         _, ox, oy, outer_r = outer
         return frame, (round(.75 * w * .50 + .25 * ox),
