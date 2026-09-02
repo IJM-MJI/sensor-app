@@ -25,10 +25,15 @@ label.  `candidate_index.csv` contains the exact video times, the uncorrected
 H2-only regression estimate, and its nearest 0--4% stage.  That estimate is a
 comparison aid, not simultaneous ground truth.
 
-Run 5 uses the RH20--80 reaction clips cut from the single source recording
-`1_90_5.MOV`: `1_90_RH20_5_x2.mp4` through
-`1_90_RH80_5_x2.mp4`.  The `_x2` suffix denotes playback/extraction speed; the
-times printed on the sheet are the derived clip-local times.
+Run 5 analysis opens the RH-labelled files `1_90_RH20_5_x2.mp4` through
+`1_90_RH80_5_x2.mp4` directly.  They were derived from `1_90_5.MOV`, but the
+full source is not used in place of the clips.  The `_x2` suffix denotes
+playback/extraction speed; the times printed on the sheet are clip-local times.
+
+The similarly named files without a repeat suffix (`1_90_RH20.mp4` through
+`1_90_RH90.mp4`) are not an independent run 1.  Duration and frame comparison
+show that they are 1x-speed duplicates of run 5, so including both versions
+would leak identical frames across training and validation.
 
 For each row, identify the frames whose **flame** matches the reviewed H2-only
 0%, 1%, 2%, 3%, and 4% optical stages.  The same frame's **droplet** is then

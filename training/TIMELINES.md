@@ -23,6 +23,12 @@ Reaction start and dividing by two only when the filename contains `_x2`.
 - `H2_only`: flame/H2 reference data.
 - `H2O_only`: droplet/RH reference data.
 - Neither suffix: simultaneous condition.
+- A missing repeat suffix on `1_90_RH20.mp4` through `1_90_RH90.mp4` does **not**
+  identify a separate run 1 in the supplied files.  Frame comparison confirms
+  these are the 1x-speed copies of the corresponding run-5 `_5_x2` clips: all
+  eight duration ratios are approximately 2.000 and matched relative-time
+  frames differ by only about 0.75--2.06 intensity levels out of 255.  They are
+  excluded to prevent duplicate train/validation leakage.
 - Reaction: stated RH setpoint with an H2 0 to 4% ramp.
 - Recovery: RH20 and H2 0%, used as the baseline/recovery condition.
 - Simultaneous RH setpoints are metadata only. They do not supervise the optical
@@ -35,6 +41,9 @@ Reaction start and dividing by two only when the filename contains `_x2`.
 - The quantitative RH model is trained only from `H2O_only` droplet colours.
 
 ## Run 5
+
+The analysis opens the RH-labelled clip files below directly.  `1_90_5.MOV` is
+recorded only as their provenance; it is not decoded in place of these clips.
 
 | RH | Reaction | Recovery | Clip file |
 |---:|---|---|---|
