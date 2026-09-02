@@ -49,10 +49,13 @@ not transfer between runs.
 
 ## Decision
 
-Do not expose simultaneous RH numbers yet.  The next viable candidate is a
-spatial droplet mask selected to be stable in H2-only data but responsive along
-the reviewed RH-only colour path.  It must be evaluated with complete-run
-holdout and must not use nominal simultaneous RH as its label.
+The app testing path must expose both simultaneous H2 and RH estimates. Until
+joint correction is validated, the RH number is explicitly marked as an
+RH-only-equivalent simultaneous provisional value rather than a final result.
+The next viable correction candidate is a spatial droplet mask selected to be
+stable in H2-only data but responsive along the reviewed RH-only colour path.
+It must be evaluated with complete-run holdout and must not use nominal
+simultaneous RH as its label.
 
 Reproducible outputs:
 

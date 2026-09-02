@@ -35,14 +35,15 @@ measurement.
 
 - `H2_only`: report the environment-routed experimental H2 range.
 - `H2O_only`: report the H2O-only experimental RH range.
-- `simultaneous`: report the four-state condition, but hide both concentration
-  numbers until their cross-interference corrections are validated.
+- `simultaneous`: report both H2 and RH estimates. Until their joint
+  cross-interference correction passes validation, mark both numbers as
+  simultaneous provisional values rather than hiding them or presenting them
+  as final calibrated concentrations.
 - RH90 simultaneous remains outside the intended quantitative scope; the target
   range remains RH20--80.
 
-This prevents a state-classification success from being presented as an
-unsupported quantitative result. Diagnostic raw values remain available to the
-developer trace for model development.
+This keeps both required outputs visible during testing while distinguishing
+the single-condition transfer baseline from the final jointly corrected model.
 
 ### Confirmed simultaneous RH target (2026-09-02)
 

@@ -685,7 +685,9 @@ doClassify=function(f){
     h2Expertp=forestProb(SENSOR_MODEL.h2_presence,h2ExpertVector);
   }
   var h2Quant=null,rhQuant=null,rhEndpointShadow=null;
-  var h2SimPending=state==='simultaneous',rhSimPending=state==='simultaneous';
+  // Simultaneous mode must expose both axes. Until the joint correction passes
+  // held-out validation, show single-condition transfers as provisional.
+  var h2SimPending=false,rhSimPending=false;
   var h2Diagnostic=null;
   if(calibrated&&window.SENSOR_CONCENTRATION_MODEL)
     h2Diagnostic=concentrationBand(SENSOR_CONCENTRATION_MODEL.models.h2,f);
@@ -966,10 +968,22 @@ doClassify=function(f){
     rhEndpointShadow=rhStableProfileShadow;
   if(!uncertain&&calibrated&&window.SENSOR_CONCENTRATION_MODEL){
     h2Quant=h2Diagnostic;
-    if(!rhSimPending){
-      rhQuant=(state==='H2O_only'&&rhEndpointShadow)?
-        rhEndpointShadow:
-        concentrationBand(SENSOR_CONCENTRATION_MODEL.models.rh,f);
+    rhQuant=(state==='H2O_only'&&rhEndpointShadow)?
+      rhEndpointShadow:
+      concentrationBand(SENSOR_CONCENTRATION_MODEL.models.rh,f);
+    if(state==='simultaneous'){
+      // Prefer the same RH-only optical profiles used by the RH path. These
+      // remain provisional until simultaneous cross-talk is validated.
+      if(rhStableProfileShadow)rhQuant=rhStableProfileShadow;
+      else if(rhEndpointShadow)rhQuant=rhEndpointShadow;
+      if(h2Quant){
+        h2Quant.simultaneousProvisional=true;
+        if(h2Quant.outside){h2Quant.extrapolated=true;h2Quant.outside=false;}
+      }
+      if(rhQuant){
+        rhQuant.simultaneousProvisional=true;
+        if(rhQuant.outside){rhQuant.extrapolated=true;rhQuant.outside=false;}
+      }
     }
     // Keep the two numeric axes consistent with the selected physical state.
     // The inactive axis is the calibrated recovery condition, not an unrelated
@@ -1106,7 +1120,10 @@ function showResult(r){
   h2E.textContent=r.state==='no_sensor'?'-':(r.state==='undecided'?'Uncertain':
     (r.h2SimPending?'Simultaneous H₂ correction pending — number hidden':
     (!calibrated?'Calibrate first':(!r.h2Quant?'Uncertain':
-      (r.h2Quant.outside?'Outside trained range / Retake':r.h2Quant.text+'% H₂ (experimental)')))));
+      (r.h2Quant.outside?'Outside trained range / Retake':r.h2Quant.text+'% H₂ ('+
+       (r.h2Quant.simultaneousProvisional?
+        ('simultaneous provisional'+(r.h2Quant.extrapolated?', extrapolated':'')):
+        'experimental')+')')))));
   h2E.style.color=r.h2?'#ef5350':'#222';
 
   var rhE=document.getElementById('rhVal');
@@ -1124,8 +1141,10 @@ function showResult(r){
   else if(!r.rhQuant){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhQuant.outside){rhE.textContent='Outside trained range / Retake';rhE.style.color='#ef5350';}
   else{rhE.textContent=r.rhQuant.text+'% RH ('+
-    (r.rhQuant.profile?'Place-2 endpoint experimental':'H2O-only calibration, experimental')+
-    ')';rhE.style.color='#42a5f5';}
+    (r.rhQuant.simultaneousProvisional?('RH-only equivalent, simultaneous provisional'+
+      (r.rhQuant.extrapolated?', extrapolated':'')):
+     (r.rhQuant.profile?'Place-2 endpoint experimental':'H2O-only calibration, experimental'))+
+    ')';rhE.style.color=r.rhQuant.simultaneousProvisional?'#ff9800':'#42a5f5';}
 
   var msg=SM[r.state]||['Unknown','#999'];
   document.getElementById('stDot').style.background=msg[1];
