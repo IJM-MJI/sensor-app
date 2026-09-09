@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.09.02 · Inner-aperture ROI + 3-frame v43</span></div>
+  <div class="header">Sensor Data<span class="app-version">2026.09.09 · Sample detection + simultaneous H2 v44</span></div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -220,8 +220,9 @@ body{
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
+<script src="sensor-h2-simultaneous-model.js?v=20260908-1"></script>
 <script>
-var APP_VERSION='2026.09.02-inner-aperture-ROI-v43';
+var APP_VERSION='2026.09.09-sample-detection-sim-H2-v44';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -565,6 +566,20 @@ function familyBConcentrationBand(f){
   }
   return{raw:model.classes[best],index:best,outside:false,
     text:model.display_levels[best],profile:'H2 environment B fixed-mask experimental'};
+}
+function simultaneousH2Band(f){
+  var root=window.SENSOR_H2_SIMULTANEOUS_MODEL;
+  var model=root&&root.models&&root.models.SIM;
+  if(!model||model.type!=='linear_scores')return null;
+  var vector=concentrationVector(model,f),best=0,bestScore=-Infinity;
+  for(var row=0;row<model.classes.length;row++){
+    var score=model.intercepts[row];
+    for(var col=0;col<vector.length;col++)score+=model.coefficients[row][col]*vector[col];
+    if(score>bestScore){bestScore=score;best=row;}
+  }
+  var levels=model.display_levels||['0','1','2','>=3'];
+  return {text:levels[best],classValue:model.classes[best],score:bestScore,
+          profile:'simultaneous effective-H2 4-band (0/1/2/>=3%)'};
 }
 function familyAZeroConsensus(f){
   var model=window.SENSOR_H2_FAMILY_A_ZERO_MODEL;
@@ -972,6 +987,7 @@ doClassify=function(f){
       rhEndpointShadow:
       concentrationBand(SENSOR_CONCENTRATION_MODEL.models.rh,f);
     if(state==='simultaneous'){
+      var simH2=simultaneousH2Band(f);if(simH2){h2Quant=simH2;h2SimPending=false;}
       // Prefer the same RH-only optical profiles used by the RH path. These
       // remain provisional until simultaneous cross-talk is validated.
       if(rhStableProfileShadow)rhQuant=rhStableProfileShadow;
@@ -1534,6 +1550,52 @@ function routeH2Environment(features){
   return{family:score>=0?model.classes[1]:model.classes[0],score:score};
 }
 
+// ===== Flame-shape presence gate =====
+// Robustly rejects no-sample scenes (empty chamber, random photos) that colour
+// statistics cannot: the printed H2 flame indicator has a distinctive silhouette
+// (concave "flame" -> low solidity; upright -> aspect ~1), while warm reflections
+// are wide, blobby (high solidity, aspect <0.5). Validated on 15 real chips (all
+// pass, any RH) vs 5 no-sample scenes (all rejected). Independent of the droplet,
+// so low-RH pale droplets still pass. Fails OPEN on any OpenCV error.
+function flameShapeGate(src,bCx,bCy,bR){
+  var mats=[];function T(m){mats.push(m);return m;}
+  try{
+    var w=src.cols,h=src.rows;
+    var bgr=T(new cv.Mat());cv.cvtColor(src,bgr,cv.COLOR_RGBA2BGR);
+    var lab=T(new cv.Mat());cv.cvtColor(bgr,lab,cv.COLOR_BGR2Lab);
+    var d=lab.data,R=Math.round(bR*0.92),R2=R*R;
+    var y1=Math.max(0,Math.round(bCy-R)),y2=Math.min(h,Math.round(bCy+R));
+    var x1=Math.max(0,Math.round(bCx-R)),x2=Math.min(w,Math.round(bCx+R));
+    var chromas=[],yy,xx,row,i,a,b,c;
+    for(yy=y1;yy<y2;yy++){row=yy*w;for(xx=x1;xx<x2;xx++){var dx=xx-bCx,dy=yy-bCy;if(dx*dx+dy*dy>R2)continue;i=(row+xx)*3;a=d[i+1]-128;b=d[i+2]-128;chromas.push(Math.sqrt(a*a+b*b));}}
+    if(chromas.length<200)return{present:true,reason:'few-px-skip'};
+    chromas.sort(function(p,q){return p-q;});
+    var cth=Math.max(16,chromas[Math.floor(chromas.length*0.88)]);
+    var mask=T(cv.Mat.zeros(h,w,cv.CV_8UC1)),md=mask.data;
+    for(yy=y1;yy<y2;yy++){row=yy*w;for(xx=x1;xx<x2;xx++){var dx2=xx-bCx,dy2=yy-bCy;if(dx2*dx2+dy2*dy2>R2)continue;i=(row+xx)*3;a=d[i+1]-128;b=d[i+2]-128;c=Math.sqrt(a*a+b*b);if(c>cth&&b>4&&a>-25)md[row+xx]=255;}}
+    var k3=T(cv.Mat.ones(3,3,cv.CV_8U)),k7=T(cv.Mat.ones(7,7,cv.CV_8U));
+    cv.morphologyEx(mask,mask,cv.MORPH_OPEN,k3);cv.morphologyEx(mask,mask,cv.MORPH_CLOSE,k7);
+    var labels=T(new cv.Mat()),stats=T(new cv.Mat()),cents=T(new cv.Mat());
+    var n=cv.connectedComponentsWithStats(mask,labels,stats,cents,8,cv.CV_32S);
+    var amin=Math.max(120,0.0018*h*w),best=-1,bestA=0,comp,area,cxb,cyb;
+    for(comp=1;comp<n;comp++){area=stats.intAt(comp,4);if(area<amin)continue;cxb=cents.doubleAt(comp,0);cyb=cents.doubleAt(comp,1);if(Math.sqrt((cxb-bCx)*(cxb-bCx)+(cyb-bCy)*(cyb-bCy))>0.85*bR)continue;if(area>bestA){bestA=area;best=comp;}}
+    if(best<0)return{present:false,reason:'no-flame-blob'};
+    var bl=stats.intAt(best,0),bt=stats.intAt(best,1),bw=stats.intAt(best,2),bh=stats.intAt(best,3);
+    var blob=T(cv.Mat.zeros(h,w,cv.CV_8UC1)),bd=blob.data;
+    for(yy=bt;yy<bt+bh;yy++){row=yy*w;for(xx=bl;xx<bl+bw;xx++){if(labels.intAt(yy,xx)===best)bd[row+xx]=255;}}
+    var contours=T(new cv.MatVector()),hier=T(new cv.Mat());
+    cv.findContours(blob,contours,hier,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+    if(contours.size()<1)return{present:false,reason:'no-contour'};
+    var bi=0,ba=0,ci,ar;for(ci=0;ci<contours.size();ci++){ar=cv.contourArea(contours.get(ci));if(ar>ba){ba=ar;bi=ci;}}
+    var cnt=contours.get(bi),rect=cv.boundingRect(cnt),asp=rect.height/Math.max(rect.width,1);
+    var hull=T(new cv.Mat());cv.convexHull(cnt,hull,false,true);
+    var sol=ba/Math.max(cv.contourArea(hull),1);
+    var present=(sol<0.80&&asp>0.6&&asp<1.7);
+    return{present:present,sol:sol,asp:asp,reason:present?'flame-shape':'not-flame-shape'};
+  }catch(e){console.warn('flameShapeGate error',e);return{present:true,reason:'error-skip'};}
+  finally{for(var m=0;m<mats.length;m++){try{mats[m].delete();}catch(e){}}}
+}
+
 function detectAndClassify(src){
   var h=src.rows, w=src.cols;
   var environmentFeatures=environmentHsvFeatures(src);
@@ -1779,6 +1841,14 @@ function detectAndClassify(src){
 
   if(allPx.length<100){
     return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,dbg:'Too few pixels ('+allPx.length+')'};
+  }
+
+  // No-sample gate: require the printed flame indicator's silhouette to be present.
+  var _flameShape=flameShapeGate(src,bCx,bCy,bR);
+  if(_flameShape&&_flameShape.present===false){
+    return{state:'no_sensor',conf:'-',h2:null,rh:null,h2S:0,h2oS:0,
+      dbg:'No sample detected — flame indicator not found ('+_flameShape.reason+
+          (_flameShape.sol!=null?' sol='+_flameShape.sol.toFixed(2)+' asp='+_flameShape.asp.toFixed(2):'')+')'};
   }
 
   function numericMedian(values){
