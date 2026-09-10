@@ -1,0 +1,25 @@
+{
+  "file": "005.png",
+  "state": "simultaneous",
+  "h2": true,
+  "rh": true,
+  "roiSource": "pattern-pair",
+  "cx": 243,
+  "cy": 137,
+  "r": 101,
+  "innerR": 91,
+  "nPx": 25995,
+  "nBg": 12997,
+  "nTop": 780,
+  "nFlame": 2453,
+  "nDrop": 1033,
+  "chromaMin": 0,
+  "chromaMax": 23.08679276123039,
+  "shapeThreshold": 6,
+  "gateThreshold": 16,
+  "registration": {
+    "x": -0.028921362278713357,
+    "y": 0.2672293574053349,
+    "angle": -0.007094138039224167
+  }
+}

@@ -57,7 +57,7 @@ H2_FEATURES = ["flame_a", "flame_b", "flame_drop_a", "flame_drop_b"]
 RH_FEATURES = ["drop_a", "drop_b"]
 H2_QUANT_FEATURES = ["flame_L", "flame_a", "flame_b"]
 RH_QUANT_FEATURES = ["drop_L", "drop_a", "drop_b"]
-CACHE_VERSION = "v7-verified-orientation-recovery-tail"
+CACHE_VERSION = "v9-pattern-landmark-roi"
 TIMED_LEGACY_SOURCES = {
     # Older full simultaneous recordings require separate fixed ROIs and
     # orientation maps. Their derived RH clips are visually verified and used
@@ -228,6 +228,87 @@ def resize_for_app(frame: np.ndarray, max_side: int = 480) -> np.ndarray:
     if scale == 1:
         return frame
     return cv2.resize(frame, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+
+
+def detect_pattern_roi(frame: np.ndarray) -> tuple[int, int, int, str] | None:
+    """Match index.html detectPatternROI on an upright app frame."""
+    small = resize_for_app(frame)
+    h, w = small.shape[:2]
+    min_side = min(w, h)
+    lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB)
+    x0, x1 = int(np.floor(w * .18)), int(np.ceil(w * .82))
+    y0, y1 = int(np.floor(h * .05)), int(np.ceil(h * .68))
+    roi = lab[y0:y1, x0:x1]
+    a = roi[:, :, 1].astype(np.float64) - 128
+    b = roi[:, :, 2].astype(np.float64) - 128
+    eligible = (b > 2) & (a > -35)
+    chroma = np.hypot(a, b)
+    values = np.sort(chroma[eligible])
+    if len(values) < 500:
+        return None
+    threshold = max(16.0, float(values[int(len(values) * .88)]))
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask[y0:y1, x0:x1] = ((chroma > threshold) & eligible).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    count, _, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    components = []
+    for index in range(1, count):
+        area = int(stats[index, cv2.CC_STAT_AREA])
+        if area < max(180, .0012 * w * h):
+            continue
+        components.append({
+            "area": area,
+            "x": int(stats[index, cv2.CC_STAT_LEFT]),
+            "y": int(stats[index, cv2.CC_STAT_TOP]),
+            "w": int(stats[index, cv2.CC_STAT_WIDTH]),
+            "h": int(stats[index, cv2.CC_STAT_HEIGHT]),
+            "cx": float(centroids[index, 0]),
+            "cy": float(centroids[index, 1]),
+        })
+    flame = None
+    flame_score = -1.0
+    for component in components:
+        nx, ny = component["cx"] / w, component["cy"] / h
+        wr, hr = component["w"] / w, component["h"] / h
+        aspect = component["h"] / max(component["w"], 1)
+        if not (.34 <= nx <= .66 and .12 <= ny <= .43
+                and .055 <= wr <= .23 and .065 <= hr <= .25
+                and .72 <= aspect <= 1.75):
+            continue
+        center_prior = np.exp(-.5 * (((nx - .50) / .16) ** 2 + ((ny - .26) / .18) ** 2))
+        score = component["area"] * (.55 + .45 * center_prior)
+        if score > flame_score:
+            flame, flame_score = component, float(score)
+    if flame is None:
+        return None
+    drop = None
+    drop_score = -1.0
+    for component in components:
+        if component is flame:
+            continue
+        dy = component["cy"] - flame["cy"]
+        dx = abs(component["cx"] - flame["cx"])
+        if not (.65 * flame["h"] <= dy <= 2.25 * flame["h"]
+                and dx <= .75 * flame["w"]
+                and .10 * flame["area"] <= component["area"] <= .95 * flame["area"]):
+            continue
+        score = component["area"] / (1 + dx / max(flame["w"], 1))
+        if score > drop_score:
+            drop, drop_score = component, float(score)
+    if drop is not None:
+        radius = (drop["cy"] - flame["cy"]) / .70
+        cx = .55 * flame["cx"] + .45 * drop["cx"]
+        source = "pattern-pair"
+    else:
+        radius = 1.95 * np.sqrt(flame["w"] * flame["h"])
+        cx = flame["cx"]
+        source = "pattern-flame"
+    radius = float(np.clip(radius, .16 * min_side, .29 * min_side))
+    cy = flame["cy"] + .22 * radius
+    if cx - radius < 0 or cx + radius > w or cy - radius < 0 or cy + radius > h:
+        return None
+    return int(round(cx)), int(round(cy)), int(round(radius)), source
 
 
 def circle_score(
@@ -927,13 +1008,18 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
     if clip.duration_hint and abs(duration - clip.duration_hint) > 3:
         raise RuntimeError(f"{clip.name}: duration {duration:.2f}s does not match {clip.duration_hint:.2f}s")
     cap = cv2.VideoCapture(str(path))
+    pattern_enabled = clip.fixed_circle is None and clip.orientation_quarters == 0
     if clip.fixed_circle is not None:
         track = [(0.0, clip.fixed_circle), (duration, clip.fixed_circle)]
+    elif pattern_enabled:
+        # The production app registers the printed flame/drop landmarks on each
+        # photograph. Build no Hough track unless a sampled frame needs fallback.
+        track = []
     elif clip.centered_crop:
         track = centered_crop_circle_track(cap, duration)
     else:
         track = circle_track(cap, duration)
-    if clip.kind == "h2_only":
+    if clip.kind == "h2_only" and not pattern_enabled:
         # The browser locks the chamber geometry from the calibration photo for
         # the rest of a run.  H2 quantitation must use the same geometry; the
         # earlier periodically re-detected track changed radius by tens of
@@ -945,8 +1031,16 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
     # above the droplet. Semantic orientation must never be inferred from color
     # area because a reacted droplet can be larger/more chromatic than the flame.
     orientation_lock, orientation_lock_confidence = clip.orientation_quarters, 1.0
-    drop_registration = (calibration_registration(cap, track, orientation_lock)
-                         if clip.registered_drop_template else None)
+    drop_registration = None
+    if clip.registered_drop_template:
+        if pattern_enabled:
+            calibration_frame = frame_at(cap, min(4.5, max(0.0, duration - .2)))
+            pattern = None if calibration_frame is None else detect_pattern_roi(calibration_frame)
+            if calibration_frame is not None and pattern is not None:
+                drop_registration = landmark_registration(
+                    calibration_frame, tuple(pattern[:3]), orientation_lock)
+        else:
+            drop_registration = calibration_registration(cap, track, orientation_lock)
     if clip.registered_drop_template:
         status = ("fallback" if drop_registration is None else
                   f"x={drop_registration[0]:.3f}, y={drop_registration[1]:.3f}, "
@@ -961,6 +1055,7 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
     effective_sample_hz = max(sample_hz, clip.minimum_sample_hz)
     sample_every = max(1, round(fps / effective_sample_hz))
     frame_index = 0
+    last_pattern_circle: tuple[int, int, int] | None = None
     while True:
         ok = cap.grab()
         if not ok:
@@ -974,7 +1069,18 @@ def sample_clip(root: Path, clip: Clip, sample_hz: float) -> list[dict[str, obje
             if clip.analysis_end is not None and t > clip.analysis_end:
                 break
             try:
-                circle = min(track, key=lambda item: abs(item[0] - t))[1]
+                if pattern_enabled:
+                    pattern = detect_pattern_roi(frame)
+                    if pattern is not None:
+                        circle = tuple(pattern[:3])
+                        last_pattern_circle = circle
+                    elif last_pattern_circle is not None:
+                        circle = last_pattern_circle
+                    else:
+                        circle = detect_circle(frame)
+                        last_pattern_circle = circle
+                else:
+                    circle = min(track, key=lambda item: abs(item[0] - t))[1]
                 raw.append((float(t), extract_features(
                     frame, circle, orientation_lock, drop_registration),
                     orientation_lock, 1.0, circle))

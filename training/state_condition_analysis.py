@@ -467,7 +467,17 @@ def main():
                 "by_state": metric["by_state"],
             }
             score = metric["balanced_accuracy"]
-            if best is None or score > best[0]:
+            # HistGradientBoosting remains an analysis candidate, but the
+            # browser exporter below serializes estimators_ decision trees.
+            # The photo workflow also supplies only current-frame Lab values;
+            # temporal and response-history features exist only in video rows.
+            # Select the deployed winner from models whose inputs the app can
+            # calculate for a single imported/captured image.
+            deployable = (
+                model_name != "gradient_boosting"
+                and feature_name in {"ab_regions", "lab_regions"}
+            )
+            if deployable and (best is None or score > best[0]):
                 best = (score, key, metric)
                 best_predictions = candidate_predictions
                 best_features = features

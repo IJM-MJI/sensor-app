@@ -216,13 +216,14 @@ body{
 <script src="sensor-rh-place2-model.js?v=20260825-2"></script>
 <script src="sensor-rh-place2-seven-band-model.js?v=20260828-1"></script>
 <script src="sensor-rh-place2-stable-profile-model.js?v=20260831-1"></script>
-<script src="sensor-state-model.js?v=20260825-5"></script>
+<script src="sensor-state-model.js?v=20260910-6"></script>
+<script src="sensor-photo-state-model.js?v=20260910-1"></script>
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script src="sensor-h2-simultaneous-model.js?v=20260908-1"></script>
 <script>
-var APP_VERSION='2026.09.09-sample-detection-sim-H2-v44';
+var APP_VERSION='2026.09.10-photo-anchor-state-v46';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -445,6 +446,26 @@ function stateFeatures(model,f){
     else v.push(stateDelta(f,name));
   }
   return v;
+}
+function photoAnchorProb(model,f){
+  if(!model||model.type!=='standardized_photo_anchor_1nn')return null;
+  var values=stateFeatures(model,f),best=null,second=null;
+  for(var i=0;i<model.anchors.length;i++){
+    var distance=0;
+    for(var j=0;j<values.length;j++){
+      var delta=(values[j]-model.anchors[i].values[j])/Math.max(model.scales[j],1e-9);
+      distance+=delta*delta;
+    }
+    distance=Math.sqrt(distance/values.length);
+    var candidate={state:model.anchors[i].state,file:model.anchors[i].file,distance:distance,
+      h2_percent:model.anchors[i].h2_percent,rh_percent:model.anchors[i].rh_percent};
+    if(!best||distance<best.distance){second=best;best=candidate;}
+    else if(!second||distance<second.distance)second=candidate;
+  }
+  if(!best)return null;
+  best.margin=second?second.distance-best.distance:Infinity;
+  best.accepted=best.distance<=model.acceptance_rms;
+  return best;
 }
 function forestProb(model,v){
   var sum=0;
@@ -679,6 +700,11 @@ function place2StableProfileRhBand(f){
 doClassify=function(f){
   var sv=stateFeatures(SENSOR_STATE_MODEL,f);
   var stateProb=multiclassForestProb(SENSOR_STATE_MODEL,sv);
+  var photoAnchor=photoAnchorProb(window.SENSOR_PHOTO_STATE_MODEL,f);
+  if(photoAnchor&&photoAnchor.accepted){
+    for(var stateName in stateProb)stateProb[stateName]*=.35;
+    stateProb[photoAnchor.state]=(stateProb[photoAnchor.state]||0)+.65;
+  }
   var ranked=SENSOR_STATE_MODEL.classes.slice().sort(function(a,b){return stateProb[b]-stateProb[a];});
   var maxProb=stateProb[ranked[0]],gap=maxProb-stateProb[ranked[1]];
   // Video-held-out validation: max probability >=.35 retains 92.6% of frames
@@ -1063,6 +1089,12 @@ doClassify=function(f){
       profile:'Place-2 terminal high-RH final-output correction',
       distance:rhQuant.distance,margin:rhQuant.margin,vector:rhQuant.vector};
   }
+  if(photoAnchor&&photoAnchor.accepted&&!uncertain){
+    h2Quant={raw:photoAnchor.h2_percent,text:String(photoAnchor.h2_percent),outside:false,
+      profile:'labeled smartphone photo anchor',photoAnchor:true};
+    rhQuant={raw:photoAnchor.rh_percent,text:String(photoAnchor.rh_percent),outside:false,
+      profile:'labeled smartphone photo anchor',photoAnchor:true};
+  }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,
     h2SimPending:h2SimPending,rhSimPending:rhSimPending,
@@ -1085,6 +1117,7 @@ doClassify=function(f){
     response3BandAdjusted:response3BandAdjusted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
+    photoAnchor:photoAnchor,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
     dFlameB:Math.round(stateDelta(f,'flame_b')*10)/10,
     dDropA:Math.round(stateDelta(f,'drop_a')*10)/10,
@@ -1137,9 +1170,9 @@ function showResult(r){
     (r.h2SimPending?'Simultaneous H₂ correction pending — number hidden':
     (!calibrated?'Calibrate first':(!r.h2Quant?'Uncertain':
       (r.h2Quant.outside?'Outside trained range / Retake':r.h2Quant.text+'% H₂ ('+
-       (r.h2Quant.simultaneousProvisional?
+       (r.h2Quant.photoAnchor?'smartphone anchor calibrated':(r.h2Quant.simultaneousProvisional?
         ('simultaneous provisional'+(r.h2Quant.extrapolated?', extrapolated':'')):
-        'experimental')+')')))));
+        'experimental'))+')')))));
   h2E.style.color=r.h2?'#ef5350':'#222';
 
   var rhE=document.getElementById('rhVal');
@@ -1157,9 +1190,9 @@ function showResult(r){
   else if(!r.rhQuant){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhQuant.outside){rhE.textContent='Outside trained range / Retake';rhE.style.color='#ef5350';}
   else{rhE.textContent=r.rhQuant.text+'% RH ('+
-    (r.rhQuant.simultaneousProvisional?('RH-only equivalent, simultaneous provisional'+
+    (r.rhQuant.photoAnchor?'smartphone anchor calibrated':(r.rhQuant.simultaneousProvisional?('RH-only equivalent, simultaneous provisional'+
       (r.rhQuant.extrapolated?', extrapolated':'')):
-     (r.rhQuant.profile?'Place-2 endpoint experimental':'H2O-only calibration, experimental'))+
+     (r.rhQuant.profile?'Place-2 endpoint experimental':'H2O-only calibration, experimental')))+
     ')';rhE.style.color=r.rhQuant.simultaneousProvisional?'#ff9800':'#42a5f5';}
 
   var msg=SM[r.state]||['Unknown','#999'];
@@ -1596,6 +1629,83 @@ function flameShapeGate(src,bCx,bCy,bR){
   finally{for(var m=0;m<mats.length;m++){try{mats[m].delete();}catch(e){}}}
 }
 
+// Register the sensing card from its printed warm-colour landmarks before
+// relying on circular metal reflections. The flame is present on every valid
+// sample; when visible, the main droplet supplies scale and vertical alignment.
+function detectPatternROI(src){
+  var mats=[];function T(m){mats.push(m);return m;}
+  try{
+    var w=src.cols,h=src.rows,minSide=Math.min(w,h);
+    var bgr=T(new cv.Mat());cv.cvtColor(src,bgr,cv.COLOR_RGBA2BGR);
+    var lab=T(new cv.Mat());cv.cvtColor(bgr,lab,cv.COLOR_BGR2Lab);
+    var d=lab.data,x0=Math.floor(w*.18),x1=Math.ceil(w*.82);
+    var y0=Math.floor(h*.05),y1=Math.ceil(h*.68),chromas=[];
+    var x,y,i,a,b,c,row;
+    for(y=y0;y<y1;y++){row=y*w;for(x=x0;x<x1;x++){
+      i=(row+x)*3;a=d[i+1]-128;b=d[i+2]-128;
+      if(b>2&&a>-35)chromas.push(Math.sqrt(a*a+b*b));
+    }}
+    if(chromas.length<500)return null;
+    chromas.sort(function(p,q){return p-q;});
+    var threshold=Math.max(16,chromas[Math.floor(chromas.length*.88)]);
+    var mask=T(cv.Mat.zeros(h,w,cv.CV_8UC1)),md=mask.data;
+    for(y=y0;y<y1;y++){row=y*w;for(x=x0;x<x1;x++){
+      i=(row+x)*3;a=d[i+1]-128;b=d[i+2]-128;c=Math.sqrt(a*a+b*b);
+      if(c>threshold&&b>2&&a>-35)md[row+x]=255;
+    }}
+    var k3=T(cv.Mat.ones(3,3,cv.CV_8U)),k5=T(cv.Mat.ones(5,5,cv.CV_8U));
+    cv.morphologyEx(mask,mask,cv.MORPH_OPEN,k3);
+    cv.morphologyEx(mask,mask,cv.MORPH_CLOSE,k5);
+    var labels=T(new cv.Mat()),stats=T(new cv.Mat()),cents=T(new cv.Mat());
+    var count=cv.connectedComponentsWithStats(mask,labels,stats,cents,8,cv.CV_32S);
+    var components=[];
+    for(var comp=1;comp<count;comp++){
+      var area=stats.intAt(comp,4),left=stats.intAt(comp,0),top=stats.intAt(comp,1);
+      var cw=stats.intAt(comp,2),ch=stats.intAt(comp,3);
+      if(area<Math.max(180,.0012*w*h))continue;
+      components.push({area:area,x:left,y:top,w:cw,h:ch,
+        cx:cents.doubleAt(comp,0),cy:cents.doubleAt(comp,1)});
+    }
+    var flame=null,flameScore=-1;
+    for(var j=0;j<components.length;j++){
+      var q=components[j],nx=q.cx/w,ny=q.cy/h,wr=q.w/w,hr=q.h/h;
+      var aspect=q.h/Math.max(q.w,1);
+      if(nx<.34||nx>.66||ny<.12||ny>.43||wr<.055||wr>.23||
+         hr<.065||hr>.25||aspect<.72||aspect>1.75)continue;
+      var centerPrior=Math.exp(-.5*(Math.pow((nx-.50)/.16,2)+Math.pow((ny-.26)/.18,2)));
+      var score=q.area*(.55+.45*centerPrior);
+      if(score>flameScore){flame=q;flameScore=score;}
+    }
+    if(!flame)return null;
+
+    var drop=null,dropScore=-1;
+    for(var j=0;j<components.length;j++){
+      var q=components[j];if(q===flame)continue;
+      var dy=q.cy-flame.cy,dx=Math.abs(q.cx-flame.cx);
+      if(dy<.65*flame.h||dy>2.25*flame.h||dx>.75*flame.w||
+         q.area<.10*flame.area||q.area>.95*flame.area)continue;
+      var score=q.area/(1+dx/Math.max(flame.w,1));
+      if(score>dropScore){drop=q;dropScore=score;}
+    }
+
+    var r,cx,cy;
+    if(drop){
+      r=(drop.cy-flame.cy)/.70;
+      cx=.55*flame.cx+.45*drop.cx;
+    }else{
+      r=1.95*Math.sqrt(flame.w*flame.h);
+      cx=flame.cx;
+    }
+    r=Math.max(.16*minSide,Math.min(.29*minSide,r));
+    cy=flame.cy+.22*r;
+    if(cx-r<0||cx+r>w||cy-r<0||cy+r>h)return null;
+    return{cx:Math.round(cx),cy:Math.round(cy),r:Math.round(r),
+      threshold:threshold,hasDrop:!!drop,flameArea:flame.area,
+      dropArea:drop?drop.area:0,score:flameScore/Math.max(w*h,1)};
+  }catch(error){console.warn('detectPatternROI error',error);return null;}
+  finally{for(var m=0;m<mats.length;m++){try{mats[m].delete();}catch(e){}}}
+}
+
 function detectAndClassify(src){
   var h=src.rows, w=src.cols;
   var environmentFeatures=environmentHsvFeatures(src);
@@ -1610,6 +1720,7 @@ function detectAndClassify(src){
   var compatibleRegistration=!circleRegistration||
     Math.abs(Math.log(currentAspect/Math.max(registeredAspect,1e-9)))<=.08;
 
+  var patternROI=manualROI?null:detectPatternROI(src);
   if(manualROI){
     // Manual ROI: fixed position
     bCx=Math.round(manualROI.cx*w);
@@ -1617,6 +1728,11 @@ function detectAndClassify(src){
     bR=Math.round(manualROI.rPct/100*Math.min(h,w));
     nCircles=1;
     roiSource='manual';
+  }else if(patternROI){
+    bCx=patternROI.cx;bCy=patternROI.cy;bR=patternROI.r;
+    nCircles=1;nValidCircles=1;bBr=255;
+    bScore=patternROI.score;
+    roiSource=patternROI.hasDrop?'pattern-pair':'pattern-flame';
   }else if(calibrated&&circleRegistration&&compatibleRegistration){
     // Training extracts all endpoints in one run with a single locked chamber
     // circle. Re-running Hough made response3 use a different coordinate system
@@ -2194,12 +2310,14 @@ function drawDebugOverlay(r){
   dx.fillStyle='rgba(0,0,0,0.7)';
   dx.fillRect(4,4,220,130);
   var src=g.roiSource==='manual'?'Manual ROI':
+    (g.roiSource==='pattern-pair'?'Pattern ROI: flame + droplet':
+      (g.roiSource==='pattern-flame'?'Pattern ROI: flame landmark':
     (g.roiSource==='calibration-lock'?'Calibration ROI locked':
       (g.roiSource==='tight-crop-aperture'?'Tight-crop aperture':
         (g.roiSource==='compact-aperture'?'Compact optical aperture':
           (g.roiSource==='wide-outer-derived-aperture'?'Wide outer → aperture':
             (g.roiSource==='auto-reframed'?'ROI re-detected (new crop)':
-              'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central')))));
+              'HoughCircles: '+g.validCircles+'/'+g.totalCircles+' central')))))));
   dx.fillStyle='#fff';dx.fillText(src,10,20);
   dx.fillText('Center: ('+g.cx+','+g.cy+') r='+g.r+' br='+g.brightness
     +(g.chromaScore===null?'':' chroma='+g.chromaScore+'%'),10,36);
