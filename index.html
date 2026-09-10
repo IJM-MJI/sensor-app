@@ -217,7 +217,6 @@ body{
 <script src="sensor-rh-place2-seven-band-model.js?v=20260828-1"></script>
 <script src="sensor-rh-place2-stable-profile-model.js?v=20260831-1"></script>
 <script src="sensor-state-model.js?v=20260910-6"></script>
-<script src="sensor-photo-state-model.js?v=20260910-1"></script>
 <script src="sensor-h2-environment-router.js?v=20260827-1"></script>
 <script src="sensor-h2-family-b-model.js?v=20260827-1"></script>
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
@@ -446,26 +445,6 @@ function stateFeatures(model,f){
     else v.push(stateDelta(f,name));
   }
   return v;
-}
-function photoAnchorProb(model,f){
-  if(!model||model.type!=='standardized_photo_anchor_1nn')return null;
-  var values=stateFeatures(model,f),best=null,second=null;
-  for(var i=0;i<model.anchors.length;i++){
-    var distance=0;
-    for(var j=0;j<values.length;j++){
-      var delta=(values[j]-model.anchors[i].values[j])/Math.max(model.scales[j],1e-9);
-      distance+=delta*delta;
-    }
-    distance=Math.sqrt(distance/values.length);
-    var candidate={state:model.anchors[i].state,file:model.anchors[i].file,distance:distance,
-      h2_percent:model.anchors[i].h2_percent,rh_percent:model.anchors[i].rh_percent};
-    if(!best||distance<best.distance){second=best;best=candidate;}
-    else if(!second||distance<second.distance)second=candidate;
-  }
-  if(!best)return null;
-  best.margin=second?second.distance-best.distance:Infinity;
-  best.accepted=best.distance<=model.acceptance_rms;
-  return best;
 }
 function forestProb(model,v){
   var sum=0;
@@ -700,11 +679,6 @@ function place2StableProfileRhBand(f){
 doClassify=function(f){
   var sv=stateFeatures(SENSOR_STATE_MODEL,f);
   var stateProb=multiclassForestProb(SENSOR_STATE_MODEL,sv);
-  var photoAnchor=photoAnchorProb(window.SENSOR_PHOTO_STATE_MODEL,f);
-  if(photoAnchor&&photoAnchor.accepted){
-    for(var stateName in stateProb)stateProb[stateName]*=.35;
-    stateProb[photoAnchor.state]=(stateProb[photoAnchor.state]||0)+.65;
-  }
   var ranked=SENSOR_STATE_MODEL.classes.slice().sort(function(a,b){return stateProb[b]-stateProb[a];});
   var maxProb=stateProb[ranked[0]],gap=maxProb-stateProb[ranked[1]];
   // Video-held-out validation: max probability >=.35 retains 92.6% of frames
@@ -1089,12 +1063,6 @@ doClassify=function(f){
       profile:'Place-2 terminal high-RH final-output correction',
       distance:rhQuant.distance,margin:rhQuant.margin,vector:rhQuant.vector};
   }
-  if(photoAnchor&&photoAnchor.accepted&&!uncertain){
-    h2Quant={raw:photoAnchor.h2_percent,text:String(photoAnchor.h2_percent),outside:false,
-      profile:'labeled smartphone photo anchor',photoAnchor:true};
-    rhQuant={raw:photoAnchor.rh_percent,text:String(photoAnchor.rh_percent),outside:false,
-      profile:'labeled smartphone photo anchor',photoAnchor:true};
-  }
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,
     h2SimPending:h2SimPending,rhSimPending:rhSimPending,
@@ -1117,7 +1085,6 @@ doClassify=function(f){
     response3BandAdjusted:response3BandAdjusted,
     h2p:Math.round(h2p*100)/100,rhp:Math.round(rhp*100)/100,
     stateConfidence:Math.round(maxProb*100)/100,stateGap:Math.round(gap*100)/100,
-    photoAnchor:photoAnchor,
     dFlameA:Math.round(stateDelta(f,'flame_a')*10)/10,
     dFlameB:Math.round(stateDelta(f,'flame_b')*10)/10,
     dDropA:Math.round(stateDelta(f,'drop_a')*10)/10,
@@ -1170,9 +1137,9 @@ function showResult(r){
     (r.h2SimPending?'Simultaneous H₂ correction pending — number hidden':
     (!calibrated?'Calibrate first':(!r.h2Quant?'Uncertain':
       (r.h2Quant.outside?'Outside trained range / Retake':r.h2Quant.text+'% H₂ ('+
-       (r.h2Quant.photoAnchor?'smartphone anchor calibrated':(r.h2Quant.simultaneousProvisional?
+       (r.h2Quant.simultaneousProvisional?
         ('simultaneous provisional'+(r.h2Quant.extrapolated?', extrapolated':'')):
-        'experimental'))+')')))));
+        'experimental')+')')))));
   h2E.style.color=r.h2?'#ef5350':'#222';
 
   var rhE=document.getElementById('rhVal');
@@ -1190,9 +1157,9 @@ function showResult(r){
   else if(!r.rhQuant){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhQuant.outside){rhE.textContent='Outside trained range / Retake';rhE.style.color='#ef5350';}
   else{rhE.textContent=r.rhQuant.text+'% RH ('+
-    (r.rhQuant.photoAnchor?'smartphone anchor calibrated':(r.rhQuant.simultaneousProvisional?('RH-only equivalent, simultaneous provisional'+
+    (r.rhQuant.simultaneousProvisional?('RH-only equivalent, simultaneous provisional'+
       (r.rhQuant.extrapolated?', extrapolated':'')):
-     (r.rhQuant.profile?'Place-2 endpoint experimental':'H2O-only calibration, experimental')))+
+     (r.rhQuant.profile?'Place-2 endpoint experimental':'H2O-only calibration, experimental'))+
     ')';rhE.style.color=r.rhQuant.simultaneousProvisional?'#ff9800':'#42a5f5';}
 
   var msg=SM[r.state]||['Unknown','#999'];
