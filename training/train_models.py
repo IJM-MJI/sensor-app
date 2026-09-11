@@ -1359,6 +1359,19 @@ def feature_value(row: dict[str, object], name: str) -> float:
         return float(row["flame_a"]) - float(row["drop_a"])
     if name == "flame_drop_b":
         return float(row["flame_b"]) - float(row["drop_b"])
+    # Direction-of-change features: chroma magnitude + unit hue vector of the
+    # (already baseline-relative) a*/b* shift, so the RH-favouring state model
+    # keys on the direction of the colour move, not just its brightness.
+    direction = re.match(r"^(flame|drop)_(dchroma|dcos|dsin)$", name)
+    if direction:
+        region, kind = direction.group(1), direction.group(2)
+        da = float(row[f"{region}_a"]); db = float(row[f"{region}_b"])
+        chroma = math.hypot(da, db)
+        if kind == "dchroma":
+            return chroma
+        if chroma < 1e-6:
+            return 0.0
+        return da / chroma if kind == "dcos" else db / chroma
     return float(row[name])
 
 

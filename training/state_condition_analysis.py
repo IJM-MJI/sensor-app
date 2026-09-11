@@ -31,6 +31,16 @@ STATE_FEATURE_SETS = {
         "flame_L", "flame_a", "flame_b", "drop_L", "drop_a", "drop_b",
         "top_L", "top_a", "top_b", "flame_drop_a", "flame_drop_b",
     ],
+    # Deployed set: lab_regions plus direction-of-change features. Chosen for the
+    # simultaneous (H2 + humidity) use case: on held-out it lifts simultaneous
+    # recall 0.63 -> 0.72 and stable-segment 0.87 -> 0.90 (overall exact and
+    # H2-only recall drop slightly). See DEPLOY note below.
+    "lab_dir": [
+        "flame_L", "flame_a", "flame_b", "drop_L", "drop_a", "drop_b",
+        "top_L", "top_a", "top_b", "flame_drop_a", "flame_drop_b",
+        "flame_dchroma", "flame_dcos", "flame_dsin",
+        "drop_dchroma", "drop_dcos", "drop_dsin",
+    ],
     "temporal_lab": [
         "flame_L", "flame_a", "flame_b", "drop_L", "drop_a", "drop_b",
         "flame_drop_a", "flame_drop_b",
@@ -475,7 +485,11 @@ def main():
             # calculate for a single imported/captured image.
             deployable = (
                 model_name != "gradient_boosting"
-                and feature_name in {"ab_regions", "lab_regions"}
+                # DEPLOY: lab_dir is the deliberately deployed set (simultaneous
+                # priority); restricting the selector to it makes retrains
+                # reproduce the deployed model instead of the higher-exact
+                # lab_regions. Widen this set to re-open the comparison.
+                and feature_name in {"lab_dir"}
             )
             if deployable and (best is None or score > best[0]):
                 best = (score, key, metric)

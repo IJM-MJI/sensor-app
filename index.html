@@ -222,7 +222,7 @@ body{
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script src="sensor-h2-simultaneous-model.js?v=20260908-1"></script>
 <script>
-var APP_VERSION='2026.09.11-segmentation-droplet-split-v49';
+var APP_VERSION='2026.09.11-state-direction-v50';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -442,7 +442,16 @@ function stateFeatures(model,f){
     var name=names[i];
     if(name==='flame_drop_a')v.push(stateDelta(f,'flame_a')-stateDelta(f,'drop_a'));
     else if(name==='flame_drop_b')v.push(stateDelta(f,'flame_b')-stateDelta(f,'drop_b'));
-    else v.push(stateDelta(f,name));
+    else{
+      // Direction-of-change features: chroma magnitude + unit hue vector of the
+      // baseline-relative a*/b* shift. Mirrors train_models.feature_value.
+      var dir=/^(flame|drop)_(dchroma|dcos|dsin)$/.exec(name);
+      if(dir){
+        var da=stateDelta(f,dir[1]+'_a'),db=stateDelta(f,dir[1]+'_b'),c=Math.sqrt(da*da+db*db);
+        if(dir[2]==='dchroma')v.push(c);
+        else v.push(c<1e-6?0:(dir[2]==='dcos'?da/c:db/c));
+      }else v.push(stateDelta(f,name));
+    }
   }
   return v;
 }
