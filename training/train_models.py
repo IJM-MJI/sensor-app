@@ -174,10 +174,15 @@ def manifest() -> list[Clip]:
     h2_indoor_4 = ((0, 5, 0), (5, 13, 1), (13, 30, 2), (30, 109, 3), (109, 122, 4), (122, 266, 0))
     h2_daylight_5 = ((0, 5, 0), (5, 8, 1), (8, 13, 2), (13, 21, 3), (21, 130, 4), (130, 272, 0))
     clips = [
-        Clip("1_90_H2_only_test.mp4", "h2_only", "h2-test-indoor", h2_segments=h2_test,
-             minimum_sample_hz=2.0, cache_tag="quant-2hz-v2-distribution"),
-        Clip("1_90_H2_only_test_2.mp4", "h2_only", "h2-test-2", h2_segments=h2_test_2,
-             minimum_sample_hz=2.0, cache_tag="quant-2hz-v2-distribution"),
+        # The uncropped test/test_2 recordings frame the chip small and off-centre,
+        # so aperture detection (and flame segmentation) fails on every frame.
+        # Their user-cropped copies (same duration/timeline) segment correctly, so
+        # use them with the centred-crop circle tracker. Recovers ~580 real H2
+        # frames that were otherwise dropped as failed extractions.
+        Clip("1_90_H2_only_test_cropped.mp4", "h2_only", "h2-test-indoor", h2_segments=h2_test,
+             minimum_sample_hz=2.0, centered_crop=True, cache_tag="quant-2hz-v2-cropped"),
+        Clip("1_90_H2_only_test_2_cropped.mp4", "h2_only", "h2-test-2", h2_segments=h2_test_2,
+             minimum_sample_hz=2.0, centered_crop=True, cache_tag="quant-2hz-v2-cropped"),
         Clip("1_90_H2_only_test_3.MOV", "h2_only", "h2-test-3", h2_segments=h2_test_3,
              minimum_sample_hz=2.0, cache_tag="quant-2hz-v2-distribution"),
         Clip("1_90_H2_only_4.mp4", "h2_only", "h2-indoor-4", h2_segments=h2_indoor_4,
