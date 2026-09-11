@@ -1102,6 +1102,17 @@ SM={no_sensor:['Sensor not found','#999'],initial:['No strong response','#66bb6a
     undecided:['Probability too close to threshold - align and retake','#ff9800']};
 
 var lastResultText='';
+// RH band label: a "lo–hi" range prints as "~hi" (upper bound).
+function fmtRh(t,sim){
+  var m=/^\s*(\d+)\s*[–\-]\s*(\d+)\s*$/.exec(t||'');
+  if(!m)return t;
+  return '~'+parseInt(m[2],10);
+}
+// H2 band label: in simultaneous mode the top band ">=3" is shown as "~4".
+function fmtH2(t,sim){
+  if(sim&&(t==='>=3'||t==='≥3'||t==='>3'))return '~4';
+  return t;
+}
 function showResult(r){
   document.getElementById('resArea').classList.remove('hidden');
   document.getElementById('sDot').style.background=SC[r.state]||'#999';
@@ -1136,7 +1147,7 @@ function showResult(r){
   h2E.textContent=r.state==='no_sensor'?'-':(r.state==='undecided'?'Uncertain':
     (r.h2SimPending?'Simultaneous H₂ correction pending — number hidden':
     (!calibrated?'Calibrate first':(!r.h2Quant?'Uncertain':
-      (r.h2Quant.outside?'Outside trained range / Retake':r.h2Quant.text+'% H₂ ('+
+      (r.h2Quant.outside?'Outside trained range / Retake':fmtH2(r.h2Quant.text,r.state==='simultaneous')+'% H₂ ('+
        (r.h2Quant.simultaneousProvisional?
         ('simultaneous provisional'+(r.h2Quant.extrapolated?', extrapolated':'')):
         'experimental')+')')))));
@@ -1151,12 +1162,12 @@ function showResult(r){
   // endpoint shadow is a developer diagnostic and must not override this
   // physically selected state in the user-facing concentration result.
   else if(r.state==='initial'||r.state==='H2_only'){
-    rhE.textContent=(r.rhQuant?r.rhQuant.text:'20–30')+'% RH (low-RH / recovery condition)';
+    rhE.textContent=fmtRh(r.rhQuant?r.rhQuant.text:'20–30',false)+'% RH (low-RH / recovery condition)';
     rhE.style.color='#222';
   }
   else if(!r.rhQuant){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhQuant.outside){rhE.textContent='Outside trained range / Retake';rhE.style.color='#ef5350';}
-  else{rhE.textContent=r.rhQuant.text+'% RH ('+
+  else{rhE.textContent=fmtRh(r.rhQuant.text,r.state==='simultaneous')+'% RH ('+
     (r.rhQuant.simultaneousProvisional?('RH-only equivalent, simultaneous provisional'+
       (r.rhQuant.extrapolated?', extrapolated':'')):
      (r.rhQuant.profile?'Place-2 endpoint experimental':'H2O-only calibration, experimental'))+
