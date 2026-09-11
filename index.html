@@ -222,7 +222,7 @@ body{
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script src="sensor-h2-simultaneous-model.js?v=20260908-1"></script>
 <script>
-var APP_VERSION='2026.09.11-segmentation-state-v48';
+var APP_VERSION='2026.09.11-segmentation-droplet-split-v49';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -2081,23 +2081,28 @@ function detectAndClassify(src){
           var dropBin=M(cv.Mat.zeros(h,w,cv.CV_8UC1)),nDrop=0;
           for(var i=0;i<region.length;i++){
             var p=region[i],bo=p.b-128;
-            var warm=(bo-wB)>4,dry=(p.L<wL-14)&&(p.L>wL-40);
+            // Warm ink, or a dry droplet slightly darker than the card. The dry
+            // branch also requires faint warmth (b* >= card+1) so a neutral
+            // shadow / chip edge cannot bridge the main and satellite droplets.
+            var warm=(bo-wB)>4,dry=(p.L<wL-13)&&(p.L>wL-42)&&(bo-wB)>=1;
             if((warm||dry)&&bo>wB-2){dropBin.ucharPtr(p.y,p.x)[0]=255;nDrop++;}
           }
           if(nDrop>0){
             var dOpen=M(new cv.Mat()),dClose=M(new cv.Mat());
             cv.morphologyEx(dropBin,dOpen,cv.MORPH_OPEN,k3);
-            cv.morphologyEx(dOpen,dClose,cv.MORPH_CLOSE,k7);
+            // CLOSE 3x3 (k3), not 7x7: a wide close bridges the two printed
+            // droplets into one blob; 3x3 keeps main and satellite separate.
+            cv.morphologyEx(dOpen,dClose,cv.MORPH_CLOSE,k3);
             var dLabels=M(new cv.Mat()),dStats=M(new cv.Mat()),dCents=M(new cv.Mat());
             var ndc=cv.connectedComponentsWithStats(dClose,dLabels,dStats,dCents,8,cv.CV_32S);
-            var damin=Math.max(40,0.0006*h*w),keep=[],maxA=-1;
+            var damin=Math.max(20,0.0003*h*w),keep=[],maxA=-1;
             for(var c=1;c<ndc;c++){
               var area=dStats.intAt(c,cv.CC_STAT_AREA);if(area<=damin)continue;
               var cw=dStats.intAt(c,cv.CC_STAT_WIDTH),chh=dStats.intAt(c,cv.CC_STAT_HEIGHT);
               var cnx=(dCents.doubleAt(c,0)-bCx)/Math.max(bR,1),cny=(dCents.doubleAt(c,1)-bCy)/Math.max(bR,1);
-              if(Math.abs(cnx-nxCenter)<0.85*nxSpan&&cw<1.8*chh&&cny<0.72){keep.push({c:c,area:area});if(area>maxA)maxA=area;}
+              if(Math.abs(cnx-nxCenter)<0.90*nxSpan&&cw<2.0*chh&&cny<0.72){keep.push({c:c,area:area});if(area>maxA)maxA=area;}
             }
-            var keepSet={};for(var i=0;i<keep.length;i++)if(keep[i].area>=0.08*maxA)keepSet[keep[i].c]=1;
+            var keepSet={};for(var i=0;i<keep.length;i++)if(keep[i].area>=0.05*maxA)keepSet[keep[i].c]=1;
             var dropPixels=[];
             for(var i=0;i<region.length;i++){var p=region[i];if(keepSet[dLabels.intAt(p.y,p.x)])dropPixels.push(p);}
             if(dropPixels.length)out.drop=dropPixels;

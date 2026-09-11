@@ -57,7 +57,7 @@ H2_FEATURES = ["flame_a", "flame_b", "flame_drop_a", "flame_drop_b"]
 RH_FEATURES = ["drop_a", "drop_b"]
 H2_QUANT_FEATURES = ["flame_L", "flame_a", "flame_b"]
 RH_QUANT_FEATURES = ["drop_L", "drop_a", "drop_b"]
-CACHE_VERSION = "v10-segmentation-shape-masks"
+CACHE_VERSION = "v11-segmentation-droplet-split"
 TIMED_LEGACY_SOURCES = {
     # Older full simultaneous recordings require separate fixed ROIs and
     # orientation maps. Their derived RH clips are visually verified and used
@@ -802,27 +802,32 @@ def segment_shapes(
         if int(card.sum()) > 20:
             white_l = float(L[card].mean())
             white_b = float(B[card].mean())
+            # Warm ink, or a dry droplet slightly darker than the card. The dry
+            # branch also requires faint warmth (b* >= card+1) so a neutral
+            # shadow / chip edge cannot bridge the main and satellite droplets.
             warm = (B - white_b > 4)
-            dry_gray = (L < white_l - 14) & (L > white_l - 40)
+            dry_gray = (L < white_l - 13) & (L > white_l - 42) & (B - white_b >= 1)
             dm = (region & (warm | dry_gray) & (B > white_b - 2)).astype(np.uint8)
             dm = cv2.morphologyEx(dm, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-            dm = cv2.morphologyEx(dm, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+            # CLOSE 3x3 (not 7x7): a wide close bridges the two printed droplets
+            # into one blob; 3x3 keeps the main and satellite droplet separate.
+            dm = cv2.morphologyEx(dm, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
             nd, dl, dst, dce = cv2.connectedComponentsWithStats(dm, 8)
             keep = []
             for i in range(1, nd):
-                if dst[i][4] <= max(40, 0.0006 * H * W):
+                if dst[i][4] <= max(20, 0.0003 * H * W):
                     continue
                 cyx = min(max(int(round(dce[i][1])), 0), H - 1)
                 cxx = min(max(int(round(dce[i][0])), 0), W - 1)
-                if (abs(nx[cyx, cxx] - nx_center) < 0.85 * nx_span
-                        and dst[i][2] < 1.8 * dst[i][3]
+                if (abs(nx[cyx, cxx] - nx_center) < 0.90 * nx_span
+                        and dst[i][2] < 2.0 * dst[i][3]
                         and ny[cyx, cxx] < 0.72):
                     keep.append(i)
             if keep:
                 main = max(keep, key=lambda i: dst[i][4])
                 main_area = dst[main][4]
                 for i in keep:
-                    if dst[i][4] >= 0.08 * main_area:
+                    if dst[i][4] >= 0.05 * main_area:
                         drop_mask |= (dl == i)
     return flame_mask, drop_mask
 
@@ -1498,6 +1503,8 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=Path("training/output"))
     parser.add_argument("--cache", type=Path, default=Path(f"training/cache/{CACHE_VERSION}/features.csv"))
     parser.add_argument("--reuse-cache", action="store_true")
+    parser.add_argument("--corrected-sources", action="store_true",
+                        help="use user-corrected more_cropped/cropped sources, clear legacy geometry, and invalidate old caches")
     parser.add_argument(
         "--prefer-cropped", action="store_true",
         help="use <original-stem>_cropped.mp4 when present while preserving logical timelines",
@@ -1519,6 +1526,8 @@ def main() -> None:
         help="continuous-label CSV; prefers the per-video H2 lag-corrected cache when available",
     )
     args = parser.parse_args()
+    if args.corrected_sources and args.reuse_cache:
+        parser.error("--corrected-sources requires fresh source-aware extraction; do not use --reuse-cache")
 
     clips = manifest()
     if args.reuse_cache and args.cache.exists():
@@ -1543,6 +1552,11 @@ def main() -> None:
                 if source_name == cropped_name else ".fixed-boundary-v2"
             if clip.kind == "h2_only":
                 source_tag += ".calibration-circle-lock-v1"
+            if args.corrected_sources:
+                from corrected_video_sources import resolve
+                source_clip, source_tag, source_info = resolve(args.video_root, clip)
+                source_name = source_clip.name
+                print(f"corrected source: {clip.name} -> {source_name}; native orientation, fresh ROI")
             if args.registered_drop_template:
                 source_tag += ".rd-v2"
             cache_identity = source_name + source_tag + (f".{clip.cache_tag}" if clip.cache_tag else "")
