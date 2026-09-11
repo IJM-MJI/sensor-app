@@ -245,6 +245,19 @@ def state_scope(row: dict[str, object]) -> bool:
                 return False
         except (KeyError, TypeError, ValueError):
             pass
+    # Failed-extraction cleanup: an H2-bearing state label with a degenerate
+    # flame extraction (baseline-relative flame L*a*b* all exactly zero, i.e. the
+    # empty-mask -> background fallback) is not real signal. Two recordings
+    # (H2_only_test, H2_only_test_2) fail flame segmentation on every frame and
+    # otherwise inject ~580 zero-signal H2-present frames. Drop such frames.
+    if truth_state(row) in ("H2_only", "simultaneous"):
+        try:
+            if (abs(float(row["flame_L"])) < 1e-9
+                    and abs(float(row["flame_a"])) < 1e-9
+                    and abs(float(row["flame_b"])) < 1e-9):
+                return False
+        except (KeyError, TypeError, ValueError):
+            pass
     return True
 
 
