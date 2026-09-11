@@ -228,10 +228,24 @@ def truth_state(row: dict[str, object]) -> str | None:
 
 def state_scope(row: dict[str, object]) -> bool:
     """State target is simultaneous RH30-80; RH20 is H2-only and RH90 is OOD."""
-    return not (
-        str(row.get("kind")) == "simultaneous"
-        and str(row.get("state")) == "simultaneous_rh90_saturated"
-    )
+    if (str(row.get("kind")) == "simultaneous"
+            and str(row.get("state")) == "simultaneous_rh90_saturated"):
+        return False
+    # Label cleanup: a simultaneous (H2 + humidity) response requires a visible
+    # droplet colour change. Frames labelled simultaneous whose baseline-relative
+    # droplet chroma is below the noise floor are optically un-reacted (the
+    # nominal timeline said RH was flowing, but the droplet had not responded);
+    # drop them so they neither train nor score as simultaneous. Applied to
+    # simultaneous only -- the same floor removes correctly-handled H2O_only
+    # frames, so it is not used there.
+    if truth_state(row) == "simultaneous":
+        try:
+            da, db = float(row["drop_a"]), float(row["drop_b"])
+            if da * da + db * db < 1.0:
+                return False
+        except (KeyError, TypeError, ValueError):
+            pass
+    return True
 
 
 def predict_excluding_group(train_rows, label, features, eval_rows):
