@@ -222,7 +222,7 @@ body{
 <script src="sensor-h2-family-a-zero-model.js?v=20260827-1"></script>
 <script src="sensor-h2-simultaneous-model.js?v=20260908-1"></script>
 <script>
-var APP_VERSION='2026.09.10-photo-anchor-state-v46';
+var APP_VERSION='2026.09.11-segmentation-state-v48';
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -2022,18 +2022,100 @@ function detectAndClassify(src){
     return{x:drop.x,y:drop.y,angle:angle};
   }
   var activeRegistration=calibrated?dropRegistration:estimateDropRegistration();
-  var flamePx=shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=-.62&&p.ny<=.14;},'flame');
-  var dropPx=shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=.18&&p.ny<=.68;},'drop');
-  var dropRegisteredPx=shapePixels(function(p){
-    if(!activeRegistration)return p.nx>=-.55&&p.nx<=.35&&p.ny>=.18&&p.ny<=.68;
-    var dx=p.nx-activeRegistration.x,dy=p.ny-activeRegistration.y;
-    var cosine=Math.cos(activeRegistration.angle),sine=Math.sin(activeRegistration.angle);
-    var localX=cosine*dx-sine*dy,localY=sine*dx+cosine*dy;
-    var main=(localX/.25)*(localX/.25)+(localY/.29)*(localY/.29)<=1;
-    var satellite=((localX-.30)/.14)*((localX-.30)/.14)+
-                  ((localY-.02)/.18)*((localY-.02)/.18)<=1;
-    return main||satellite;
-  },'drop_registered');
+  // Chromatic-ink segmentation of the flame/droplet silhouettes. Mirrors the
+  // training segment_shapes(): warm-ink connected components on the balanced
+  // Lab, flame = largest central blob, droplet = warm/dry ink on the card below
+  // the flame (main + satellite). Falls back to the fixed-box shape masks if the
+  // browser OpenCV build lacks connected-component support or segmentation fails.
+  function segmentShapes(){
+    var out={flame:null,drop:null};
+    if(typeof cv.connectedComponentsWithStats!=='function')return out;
+    var mats=[];
+    function M(m){mats.push(m);return m;}
+    try{
+      var cvals=allPx.map(function(p){return p.c;}).sort(function(a,b){return a-b;});
+      var cth=Math.max(16,percentile(cvals,88));
+      var inkBin=M(cv.Mat.zeros(h,w,cv.CV_8UC1)),nInk=0;
+      for(var i=0;i<allPx.length;i++){
+        var p=allPx[i];
+        if(p.c>cth&&(p.b-128)>4&&(p.a-128)>-25){inkBin.ucharPtr(p.y,p.x)[0]=255;nInk++;}
+      }
+      if(nInk<20)return out;
+      var k3=M(cv.Mat.ones(3,3,cv.CV_8U)),k7=M(cv.Mat.ones(7,7,cv.CV_8U));
+      var opened=M(new cv.Mat()),closed=M(new cv.Mat());
+      cv.morphologyEx(inkBin,opened,cv.MORPH_OPEN,k3);
+      cv.morphologyEx(opened,closed,cv.MORPH_CLOSE,k7);
+      var labels=M(new cv.Mat()),stats=M(new cv.Mat()),cents=M(new cv.Mat());
+      var ncomp=cv.connectedComponentsWithStats(closed,labels,stats,cents,8,cv.CV_32S);
+      var amin=Math.max(60,0.0010*h*w),flameIdx=-1,flameArea=-1;
+      for(var c=1;c<ncomp;c++){
+        var area=stats.intAt(c,cv.CC_STAT_AREA);if(area<=amin)continue;
+        var cnx=(cents.doubleAt(c,0)-bCx)/Math.max(bR,1),cny=(cents.doubleAt(c,1)-bCy)/Math.max(bR,1);
+        if(Math.sqrt(cnx*cnx+cny*cny)<0.85&&area>flameArea){flameArea=area;flameIdx=c;}
+      }
+      if(flameIdx<0)return out;
+      var flamePixels=[],fnx=[],fny=[];
+      for(var i=0;i<allPx.length;i++){
+        var p=allPx[i];
+        if(labels.intAt(p.y,p.x)===flameIdx){flamePixels.push(p);fnx.push(p.nx);fny.push(p.ny);}
+      }
+      out.flame=flamePixels;
+      var nxSum=0;for(var i=0;i<fnx.length;i++)nxSum+=fnx[i];
+      var nxCenter=nxSum/fnx.length;
+      var nyMax=Math.max.apply(null,fny),nyMin=Math.min.apply(null,fny);
+      var nxMax=Math.max.apply(null,fnx),nxMin=Math.min.apply(null,fnx);
+      var nySpan=Math.max(nyMax-nyMin,0.15),nxSpan=Math.max(nxMax-nxMin,0.20);
+      var flameSet={};for(var i=0;i<flamePixels.length;i++)flameSet[flamePixels[i].y*w+flamePixels[i].x]=1;
+      var nyHi=Math.min(nyMax+1.7*nySpan,0.74),region=[];
+      for(var i=0;i<allPx.length;i++){
+        var p=allPx[i];if(flameSet[p.y*w+p.x])continue;
+        if(p.ny>nyMax-0.02*nySpan&&p.ny<nyHi&&Math.abs(p.nx-nxCenter)<0.75*nxSpan)region.push(p);
+      }
+      if(region.length>20){
+        var regL=region.map(function(p){return p.L;}).sort(function(a,b){return a-b;});
+        var l55=percentile(regL,55);
+        var cardPx=region.filter(function(p){return p.c<12&&p.L>l55;});
+        if(cardPx.length>20){
+          var wL=0,wB=0;for(var i=0;i<cardPx.length;i++){wL+=cardPx[i].L;wB+=(cardPx[i].b-128);}
+          wL/=cardPx.length;wB/=cardPx.length;
+          var dropBin=M(cv.Mat.zeros(h,w,cv.CV_8UC1)),nDrop=0;
+          for(var i=0;i<region.length;i++){
+            var p=region[i],bo=p.b-128;
+            var warm=(bo-wB)>4,dry=(p.L<wL-14)&&(p.L>wL-40);
+            if((warm||dry)&&bo>wB-2){dropBin.ucharPtr(p.y,p.x)[0]=255;nDrop++;}
+          }
+          if(nDrop>0){
+            var dOpen=M(new cv.Mat()),dClose=M(new cv.Mat());
+            cv.morphologyEx(dropBin,dOpen,cv.MORPH_OPEN,k3);
+            cv.morphologyEx(dOpen,dClose,cv.MORPH_CLOSE,k7);
+            var dLabels=M(new cv.Mat()),dStats=M(new cv.Mat()),dCents=M(new cv.Mat());
+            var ndc=cv.connectedComponentsWithStats(dClose,dLabels,dStats,dCents,8,cv.CV_32S);
+            var damin=Math.max(40,0.0006*h*w),keep=[],maxA=-1;
+            for(var c=1;c<ndc;c++){
+              var area=dStats.intAt(c,cv.CC_STAT_AREA);if(area<=damin)continue;
+              var cw=dStats.intAt(c,cv.CC_STAT_WIDTH),chh=dStats.intAt(c,cv.CC_STAT_HEIGHT);
+              var cnx=(dCents.doubleAt(c,0)-bCx)/Math.max(bR,1),cny=(dCents.doubleAt(c,1)-bCy)/Math.max(bR,1);
+              if(Math.abs(cnx-nxCenter)<0.85*nxSpan&&cw<1.8*chh&&cny<0.72){keep.push({c:c,area:area});if(area>maxA)maxA=area;}
+            }
+            var keepSet={};for(var i=0;i<keep.length;i++)if(keep[i].area>=0.08*maxA)keepSet[keep[i].c]=1;
+            var dropPixels=[];
+            for(var i=0;i<region.length;i++){var p=region[i];if(keepSet[dLabels.intAt(p.y,p.x)])dropPixels.push(p);}
+            if(dropPixels.length)out.drop=dropPixels;
+          }
+        }
+      }
+      return out;
+    }catch(segErr){console.warn('segmentShapes failed; using box masks.',segErr);return{flame:null,drop:null};}
+    finally{for(var mi=0;mi<mats.length;mi++){try{mats[mi].delete();}catch(_){}}}
+  }
+  var _seg=segmentShapes();
+  var flamePx=_seg.flame||shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=-.62&&p.ny<=.14;},'flame');
+  var dropPx=_seg.drop||shapePixels(function(p){return p.nx>=-.55&&p.nx<=.35&&p.ny>=.18&&p.ny<=.68;},'drop');
+  for(var i=0;i<flamePx.length;i++)if(flamePx[i].cat!=='top')flamePx[i].cat='flame';
+  for(var i=0;i<dropPx.length;i++)if(dropPx[i].cat!=='top')dropPx[i].cat='drop';
+  // Segmentation merges the main and satellite droplet, so the registered
+  // template collapses onto the same droplet mask (kept for feature parity).
+  var dropRegisteredPx=dropPx;
   // Place-2 endpoint RH profile: reproduce the offline tight-droplet and
   // nearby-substrate controls. Both are measured after the same neutral/WB
   // correction, then calibration removes their initial RH20 difference.

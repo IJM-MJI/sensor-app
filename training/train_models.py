@@ -57,7 +57,7 @@ H2_FEATURES = ["flame_a", "flame_b", "flame_drop_a", "flame_drop_b"]
 RH_FEATURES = ["drop_a", "drop_b"]
 H2_QUANT_FEATURES = ["flame_L", "flame_a", "flame_b"]
 RH_QUANT_FEATURES = ["drop_L", "drop_a", "drop_b"]
-CACHE_VERSION = "v9-pattern-landmark-roi"
+CACHE_VERSION = "v10-segmentation-shape-masks"
 TIMED_LEGACY_SOURCES = {
     # Older full simultaneous recordings require separate fixed ROIs and
     # orientation maps. Their derived RH clips are visually verified and used
@@ -738,6 +738,95 @@ def masked_shape_pixels(
     return lab[selected]
 
 
+def segment_shapes(
+    lab: np.ndarray,
+    chamber_mask: np.ndarray,
+    nx: np.ndarray,
+    ny: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Chromatic-ink segmentation of the flame and droplet indicators.
+
+    Replaces the fixed-box / top-percentile shape masks. Operates on the already
+    balanced ``lab`` and the pipeline geometry (chamber disk + orientation-
+    normalised ``nx``/``ny``), so it stays consistent with the rest of
+    ``extract_features`` and mirrors the in-browser ``segmentShapes``.
+
+    Flame  = largest central warm-ink connected component.
+    Droplet = warm-ink (or mildly darker "dry") pixels on the card directly below
+    the flame, main blob plus any satellite >=8% of its area. The chamber metal is
+    rejected by a brightness floor. Returns two full-frame boolean masks.
+    """
+    H, W = chamber_mask.shape
+    # normalized_coordinates returns ogrid arrays ((1,W) and (H,1)); direct
+    # pixel indexing below needs the full broadcast grids.
+    nx = np.broadcast_to(nx, (H, W))
+    ny = np.broadcast_to(ny, (H, W))
+    A = lab[:, :, 1] - 128.0
+    B = lab[:, :, 2] - 128.0
+    L = lab[:, :, 0]
+    C = np.hypot(A, B)
+    empty = np.zeros((H, W), dtype=bool)
+    if int(chamber_mask.sum()) < 100:
+        return empty, empty.copy()
+    cth = max(16.0, float(np.percentile(C[chamber_mask], 88)))
+    ink = (chamber_mask & (C > cth) & (B > 4) & (A > -25)).astype(np.uint8)
+    ink = cv2.morphologyEx(ink, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    ni, lb, st, ce = cv2.connectedComponentsWithStats(ink, 8)
+    amin = max(60, 0.0010 * H * W)
+    cand = []
+    for i in range(1, ni):
+        if st[i][4] <= amin:
+            continue
+        cyx = min(max(int(round(ce[i][1])), 0), H - 1)
+        cxx = min(max(int(round(ce[i][0])), 0), W - 1)
+        if np.hypot(nx[cyx, cxx], ny[cyx, cxx]) < 0.85:
+            cand.append(i)
+    if not cand:
+        return empty, empty.copy()
+    flame_index = max(cand, key=lambda i: st[i][4])
+    flame_mask = (lb == flame_index)
+    flame_nx = nx[flame_mask]
+    flame_ny = ny[flame_mask]
+    nx_center = float(np.mean(flame_nx))
+    ny_bottom = float(flame_ny.max())
+    ny_span = max(float(flame_ny.max() - flame_ny.min()), 0.15)
+    nx_span = max(float(flame_nx.max() - flame_nx.min()), 0.20)
+    region = (chamber_mask & (~flame_mask)
+              & (ny > ny_bottom - 0.02 * ny_span)
+              & (ny < min(ny_bottom + 1.7 * ny_span, 0.74))
+              & (np.abs(nx - nx_center) < 0.75 * nx_span))
+    drop_mask = empty.copy()
+    if int(region.sum()) > 20:
+        card = region & (C < 12) & (L > np.percentile(L[region], 55))
+        if int(card.sum()) > 20:
+            white_l = float(L[card].mean())
+            white_b = float(B[card].mean())
+            warm = (B - white_b > 4)
+            dry_gray = (L < white_l - 14) & (L > white_l - 40)
+            dm = (region & (warm | dry_gray) & (B > white_b - 2)).astype(np.uint8)
+            dm = cv2.morphologyEx(dm, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+            dm = cv2.morphologyEx(dm, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+            nd, dl, dst, dce = cv2.connectedComponentsWithStats(dm, 8)
+            keep = []
+            for i in range(1, nd):
+                if dst[i][4] <= max(40, 0.0006 * H * W):
+                    continue
+                cyx = min(max(int(round(dce[i][1])), 0), H - 1)
+                cxx = min(max(int(round(dce[i][0])), 0), W - 1)
+                if (abs(nx[cyx, cxx] - nx_center) < 0.85 * nx_span
+                        and dst[i][2] < 1.8 * dst[i][3]
+                        and ny[cyx, cxx] < 0.72):
+                    keep.append(i)
+            if keep:
+                main = max(keep, key=lambda i: dst[i][4])
+                main_area = dst[main][4]
+                for i in keep:
+                    if dst[i][4] >= 0.08 * main_area:
+                        drop_mask |= (dl == i)
+    return flame_mask, drop_mask
+
+
 def droplet_template_zone(
     chamber_mask: np.ndarray,
     nx: np.ndarray,
@@ -893,12 +982,21 @@ def extract_features(
     # (notably RH response runs) and incorrectly fed it to the droplet region.
     flame_zone = mask & central_x & (ny >= -.62) & (ny <= .14)
     drop_zone = mask & central_x & (ny >= .18) & (ny <= .68)
-    registered_zone = (registered_droplet_template_zone(mask, nx, ny, drop_registration)
-                       if drop_registration is not None else drop_zone)
-    flame, flame_stats = shape_summary(masked_shape_pixels(lab, flame_zone, bg), "flame")
-    drop, drop_stats = shape_summary(masked_shape_pixels(lab, drop_zone, bg), "drop")
-    drop_registered, _ = shape_summary(
-        masked_shape_pixels(lab, registered_zone, bg), "drop_registered")
+    # Chromatic-ink segmentation replaces the fixed-box / top-percentile masks.
+    # The fixed zones are retained above only as a search prior; the flame/drop
+    # pixels now follow the printed silhouettes. Segmentation already merges the
+    # main and satellite droplet, so the registered template collapses onto the
+    # same droplet mask (kept for feature-vector compatibility).
+    flame_mask, drop_mask = segment_shapes(lab, mask, nx, ny)
+
+    def segment_pixels(shape_mask: np.ndarray) -> np.ndarray:
+        if not np.any(shape_mask):
+            return np.repeat(bg[None, :], 20, axis=0)
+        return lab[shape_mask]
+
+    flame, flame_stats = shape_summary(segment_pixels(flame_mask), "flame")
+    drop, drop_stats = shape_summary(segment_pixels(drop_mask), "drop")
+    drop_registered, _ = shape_summary(segment_pixels(drop_mask), "drop_registered")
     return {
         "flame_L": flame[0], "flame_a": flame[1], "flame_b": flame[2],
         "drop_L": drop[0], "drop_a": drop[1], "drop_b": drop[2],
