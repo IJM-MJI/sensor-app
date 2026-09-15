@@ -1077,6 +1077,11 @@ doClassify=function(f){
       profile:'Place-2 terminal high-RH final-output correction',
       distance:rhQuant.distance,margin:rhQuant.margin,vector:rhQuant.vector};
   }
+  // Reconcile the validated state classifier with the experimental concentration
+  // model: if H2-only is called but the H2 concentration rounds to 0%, fall back
+  // to the conservative Initial state so the reading never shows "0% H2" under an
+  // H2-only label.
+  if(state==='H2_only'&&h2Quant&&h2Quant.text==='0'){state='initial';h2=0;}
   return{state:state,conf:maxProb>=.55?'high':(maxProb>=.40?'medium':'low'),h2:uncertain?null:h2,rh:uncertain?null:rh,
     h2Quant:h2Quant,rhQuant:rhQuant,rhEndpointShadow:rhEndpointShadow,
     h2SimPending:h2SimPending,rhSimPending:rhSimPending,
@@ -1155,7 +1160,7 @@ function showResult(r){
     (r.flameShift!=null?' flShift='+r.flameShift.toFixed(2):'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
-  document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+(SHOW_DEBUG?'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>':'');
+  document.getElementById('sConf').innerHTML=(SHOW_DEBUG?(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>':'');
 
   var h2E=document.getElementById('h2Val');
   h2E.textContent=r.state==='no_sensor'?'-':(r.state==='undecided'?'Uncertain':
