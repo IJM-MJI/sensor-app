@@ -127,7 +127,7 @@ body{
 </head>
 <body>
 
-  <div class="header">Sensor Data<span class="app-version">2026.09.09 · Sample detection + simultaneous H2 v44</span></div>
+  <div class="header">Sensor Data</div>
 
 <div id="loadingScreen" class="loading">
   <div class="spin"></div>
@@ -223,6 +223,11 @@ body{
 <script src="sensor-h2-simultaneous-model.js?v=20260908-1"></script>
 <script>
 var APP_VERSION='2026.09.11-state-direction-labelclean-cropfix-v53';
+// Developer diagnostics: the on-frame ROI stats HUD, the per-frame probability
+// line under the state, and the concentration condition tags (experimental /
+// low-RH-recovery / provisional). Hidden for the user-facing app; set to true
+// to bring the diagnostics back.
+var SHOW_DEBUG=false;
 // ===== CLASSIFIER v5 (top-chroma percentile + calibration delta) =====
 // Default baseline from the recovery condition (RH 20%, H2 0%).
 var BL_DEFAULT={
@@ -1150,16 +1155,16 @@ function showResult(r){
     (r.flameShift!=null?' flShift='+r.flameShift.toFixed(2):'')+' '
     +'dFl=('+r.dFlameA+','+r.dFlameB+') dDr=('+r.dDropA+','+r.dDropB+') dTop=('+r.dTopA+','+r.dTopB+')';
   lastResultText=(SN[r.state]||r.state)+' | '+vals;
-  document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>';
+  document.getElementById('sConf').innerHTML=(cm[r.conf]||'')+(SHOW_DEBUG?'<br><span style="font-size:13px;font-family:monospace">'+vals+'</span>':'');
 
   var h2E=document.getElementById('h2Val');
   h2E.textContent=r.state==='no_sensor'?'-':(r.state==='undecided'?'Uncertain':
     (r.h2SimPending?'Simultaneous H₂ correction pending — number hidden':
     (!calibrated?'Calibrate first':(!r.h2Quant?'Uncertain':
-      (r.h2Quant.outside?'Outside trained range / Retake':fmtH2(r.h2Quant.text,r.state==='simultaneous')+'% H₂ ('+
-       (r.h2Quant.simultaneousProvisional?
+      (r.h2Quant.outside?'Outside trained range / Retake':fmtH2(r.h2Quant.text,r.state==='simultaneous')+'% H₂'+
+       (SHOW_DEBUG?' ('+(r.h2Quant.simultaneousProvisional?
         ('simultaneous provisional'+(r.h2Quant.extrapolated?', extrapolated':'')):
-        'experimental')+')')))));
+        'experimental')+')':''))))));
   h2E.style.color=r.h2?'#ef5350':'#222';
 
   var rhE=document.getElementById('rhVal');
@@ -1171,16 +1176,16 @@ function showResult(r){
   // endpoint shadow is a developer diagnostic and must not override this
   // physically selected state in the user-facing concentration result.
   else if(r.state==='initial'||r.state==='H2_only'){
-    rhE.textContent=fmtRh(r.rhQuant?r.rhQuant.text:'20–30',false)+'% RH (low-RH / recovery condition)';
+    rhE.textContent=fmtRh(r.rhQuant?r.rhQuant.text:'20–30',false)+'% RH'+(SHOW_DEBUG?' (low-RH / recovery condition)':'');
     rhE.style.color='#222';
   }
   else if(!r.rhQuant){rhE.textContent='Uncertain';rhE.style.color='#ff9800';}
   else if(r.rhQuant.outside){rhE.textContent='Outside trained range / Retake';rhE.style.color='#ef5350';}
-  else{rhE.textContent=fmtRh(r.rhQuant.text,r.state==='simultaneous')+'% RH ('+
-    (r.rhQuant.simultaneousProvisional?('RH-only equivalent, simultaneous provisional'+
+  else{rhE.textContent=fmtRh(r.rhQuant.text,r.state==='simultaneous')+'% RH'+
+    (SHOW_DEBUG?' ('+(r.rhQuant.simultaneousProvisional?('RH-only equivalent, simultaneous provisional'+
       (r.rhQuant.extrapolated?', extrapolated':'')):
      (r.rhQuant.profile?'Place-2 endpoint experimental':'H2O-only calibration, experimental'))+
-    ')';rhE.style.color=r.rhQuant.simultaneousProvisional?'#ff9800':'#42a5f5';}
+    ')':'');rhE.style.color=r.rhQuant.simultaneousProvisional?'#ff9800':'#42a5f5';}
 
   var msg=SM[r.state]||['Unknown','#999'];
   document.getElementById('stDot').style.background=msg[1];
@@ -2379,7 +2384,8 @@ function drawDebugOverlay(r){
   dx.strokeStyle='rgba(255,255,0,0.7)';dx.lineWidth=2;
   dx.beginPath();dx.arc(circleX,circleY,innerCircleR,0,Math.PI*2);dx.stroke();
 
-  // Legend and stats
+  // Legend and stats (developer diagnostics only)
+  if(!SHOW_DEBUG) return;
   dx.font='bold 14px sans-serif';
   dx.fillStyle='rgba(0,0,0,0.7)';
   dx.fillRect(4,4,220,130);
