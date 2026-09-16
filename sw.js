@@ -3,7 +3,7 @@
    with a cached fallback for offline. Everything else (versioned model JS, the
    OpenCV.js CDN bundle, icons): cache-first with a background fill, so after the
    first online load the app runs fully offline. Bump CACHE to invalidate. */
-const CACHE = 'sensor-data-v3';
+const CACHE = 'sensor-data-v4';
 
 self.addEventListener('install', function (e) {
   e.waitUntil(

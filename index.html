@@ -739,6 +739,10 @@ doClassify=function(f){
   // confidence. The lower bound deliberately excludes the known gross H2
   // extrapolation at rawH2=-7.06 rather than silently calling it Initial.
   var lowResponseRecovered=false;
+  // Low-humidity simultaneous downgrade flag (see the gate after simultaneous
+  // quantitation): RH 20–30% is the droplet's dry baseline, so a simultaneous
+  // call at the lowest RH band is reported as H2-only.
+  var lowRhSimultaneousDowngraded=false;
   var shadowVector=rhEndpointShadow&&rhEndpointShadow.vector;
   var shadowLimit=place2RhModel&&place2RhModel.low_chroma_abs_ab_max;
   var directLowChroma=shadowVector&&isFinite(shadowLimit)&&
@@ -1021,6 +1025,17 @@ doClassify=function(f){
         if(rhQuant.outside){rhQuant.extrapolated=true;rhQuant.outside=false;}
       }
     }
+    // Low-humidity simultaneous downgrade: RH 20–30% is effectively the dry
+    // baseline of the droplet indicator, so a "simultaneous" call at the lowest
+    // RH band is reported as H2-only rather than a genuine co-condition. Genuine
+    // high-RH simultaneous reads apparent RH 40–50% (H2 dilution), so gating the
+    // single lowest band does not touch true co-conditions.
+    if(state==='simultaneous'&&rhQuant&&
+        (rhQuant.text==='20–30'||rhQuant.index===0)){
+      state='H2_only';rh=false;h2=true;
+      h2Quant=h2Diagnostic;
+      lowRhSimultaneousDowngraded=true;
+    }
     // Keep the two numeric axes consistent with the selected physical state.
     // The inactive axis is the calibrated recovery condition, not an unrelated
     // regression extrapolation that can contradict the state label.
@@ -1103,6 +1118,7 @@ doClassify=function(f){
     place2HighBandPromoted:place2HighBandPromoted,
     place2UncertainRhFallback:place2UncertainRhFallback,
     place2FinalHighOutputPromoted:place2FinalHighOutputPromoted,
+    lowRhSimultaneousDowngraded:lowRhSimultaneousDowngraded,
     response6LowRecovered:response6LowRecovered,
     response6LowSignature:response6LowSignature,
     response6MiddleAdjusted:response6MiddleAdjusted,
